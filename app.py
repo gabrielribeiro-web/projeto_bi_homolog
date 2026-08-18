@@ -71,7 +71,7 @@ def exibir_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.subheader("🔑 Acesso ao Portal de B.I.")
-        st.write("Insira suas credenciais para continuar.")
+        st.write("Insira suas credenciais do Grupo Querino para continuar.")
 
         with st.form("form_login"):
             email_input = st.text_input("E-mail")
@@ -95,10 +95,11 @@ def exibir_login():
                         st.error("E-mail ou senha incorretos.")
 
 
-# 6. Painel Principal
+# 6. Painel Principal com Cabeçalho e Logo
 def exibir_painel():
     user = st.session_state["usuario_logado"]
 
+    # Barra lateral
     st.sidebar.title(f"👤 {user['nome']}")
     st.sidebar.caption(f"Perfil: {user['perfil'].upper()}")
     st.sidebar.write("---")
@@ -107,8 +108,22 @@ def exibir_painel():
         st.session_state["usuario_logado"] = None
         st.rerun()
 
-    st.title("📊 Portal de Business Intelligence - Grupo Querino")
-    st.write(f"Bem-vindo(a), **{user['nome']}**!")
+    # Cabeçalho com Título e Logo da Empresa
+    col_titulo, col_logo = st.columns([3, 1])
+
+    with col_titulo:
+        st.title("📊 Portal de Business Intelligence")
+        st.write(f"Bem-vindo(a), **{user['nome']}**!")
+
+    with col_logo:
+        # Tenta carregar a imagem da logo local 'logo.png'
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=200)
+        else:
+            # Texto alternativo caso o arquivo ainda não exista na pasta
+            st.markdown(
+                "### **Grupo Querino**", unsafe_allow_html=True
+            )
 
     st.write("---")
     col1, col2, col3 = st.columns(3)
