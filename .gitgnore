@@ -1,0 +1,7 @@
+# Cria o arquivo .gitignore no PowerShell
+Set-Content -Path .gitignore -Value "
+.venv/
+__pycache__/
+*.env
+.vscode/
+"
