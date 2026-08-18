@@ -71,7 +71,7 @@ def exibir_login():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.subheader("🔑 Acesso ao Portal de B.I.")
-        st.write("Insira suas credenciais do Grupo Querino para continuar.")
+        st.write("Insira suas credenciais para continuar.")
 
         with st.form("form_login"):
             email_input = st.text_input("E-mail")
