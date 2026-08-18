@@ -1,27 +1,47 @@
 import os
+import bcrypt  # IMPORTANTE: importar a biblioteca
+import pandas as pd
 import streamlit as st
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
-# Configuração da página
-st.set_page_config(
-    page_title="Portal B.I. - Grupo Querino", page_icon="📊", layout="wide"
-)
-
-# Conexão com o banco (pega das variáveis de ambiente ou usa a URL padrão)
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres.dychhsqpvqtwaslujbir:Acess%40bi2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require",
-)
+# ... (Mantenha as configurações iniciais de página e engine) ...
 
 
-@st.cache_resource
-def get_db_connection():
-    return create_engine(DATABASE_URL)
+# Função para gerar hash (use para cadastrar novas senhas no futuro)
+def gerar_hash_senha(senha_plana: str) -> str:
+    salt = bcrypt.gensalt(12)
+    return bcrypt.hashpw(senha_plana.encode("utf-8"), salt).decode("utf-8")
 
 
-st.title("📊 Portal de Business Intelligence - Grupo Querino")
-st.write(
-    "Bem-vindo ao sistema centralizado de relatórios e controle de dados."
-)
+# Função de Validação de Login Atualizada
+def autenticar_usuario(email, senha_informada):
+    query = text(
+        """
+        SELECT id, nome, email, senha_hash, perfil, ativo 
+        FROM public.tb_usuarios 
+        WHERE email = :email
+    """
+    )
+    with engine.connect() as conn:
+        res = conn.execute(query, {"email": email}).fetchone()
+        if res:
+            hash_salvo = res.senha_hash
 
-st.success("Conexão com o banco de dados Supabase configurada com sucesso!")
+            # Verifica a senha digitada contra o Hash armazenado no banco
+            try:
+                senha_valida = bcrypt.checkpw(
+                    senha_informada.encode("utf-8"), hash_salvo.encode("utf-8")
+                )
+            except ValueError:
+                # Caso haja algum resíduo de senha em texto puro antiga
+                senha_valida = hash_salvo == senha_informada
+
+            if senha_valida:
+                return {
+                    "id": res.id,
+                    "nome": res.nome,
+                    "email": res.email,
+                    "perfil": res.perfil,
+                    "ativo": res.ativo,
+                }
+    return None
