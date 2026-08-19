@@ -95,7 +95,7 @@ def exibir_login():
                         st.error("E-mail ou senha incorretos.")
 
 
-# 6. Painel Principal com Cabeçalho e Logo
+# 6. Painel Principal com Power BI Incorporado
 def exibir_painel():
     user = st.session_state["usuario_logado"]
 
@@ -108,7 +108,7 @@ def exibir_painel():
         st.session_state["usuario_logado"] = None
         st.rerun()
 
-    # Cabeçalho com Título e Logo da Empresa
+    # Cabeçalho com Título e Logo
     col_titulo, col_logo = st.columns([3, 1])
 
     with col_titulo:
@@ -116,36 +116,18 @@ def exibir_painel():
         st.write(f"Bem-vindo(a), **{user['nome']}**!")
 
     with col_logo:
-        # Tenta carregar a imagem da logo local 'logo.png'
         if os.path.exists("logo.png"):
             st.image("logo.png", width=200)
         else:
-            # Texto alternativo caso o arquivo ainda não exista na pasta
-            st.markdown(
-                "### **Grupo Querino**", unsafe_allow_html=True
-            )
+            st.markdown("### **Grupo Querino**", unsafe_allow_html=True)
 
     st.write("---")
-    col1, col2, col3 = st.columns(3)
 
-    with col1:
-        st.metric(
-            label="Total de Instrutores",
-            value=f"{pd.read_sql_query('SELECT COUNT(*) FROM dim_instrutores', engine).iloc[0, 0]:,}",
-        )
-    with col2:
-        st.metric(
-            label="Registros Comerciais",
-            value=f"{pd.read_sql_query('SELECT COUNT(*) FROM fato_comercial', engine).iloc[0, 0]:,}",
-        )
-    with col3:
-        st.metric(
-            label="Treinamentos Realizados",
-            value=f"{pd.read_sql_query('SELECT COUNT(*) FROM fato_treinamentos', engine).iloc[0, 0]:,}",
-        )
+    # URL do relatório publicado no Power BI Service
+    power_bi_url = "https://app.powerbi.com/reportEmbed?reportId=09875d00-042a-4a73-96e0-414ce0bb6cb6&autoAuth=true&ctid=eda0319f-5c00-44a9-8abf-250bf450fb16"
 
-    st.write("---")
-    st.info("Módulos de relatórios e Power BI serão integrados nesta área.")
+    # Incorporação do Dashboard no Streamlit
+    st.components.v1.iframe(src=power_bi_url, height=800, scrolling=True)
 
 
 # 7. Execução do App
