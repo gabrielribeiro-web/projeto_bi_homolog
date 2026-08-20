@@ -44,7 +44,7 @@ engine = get_engine()
 # Cabeçalho
 col_tit, col_logo = st.columns([3, 1])
 with col_tit:
-    st.title("📊 Portal de Business Intelligence")
+    st.title("📊 Portal de Dashboard")
     st.caption("Visão Consolidada de Treinamentos e Indicadores Financeiros")
 with col_logo:
     if os.path.exists("logo.png"):
@@ -115,7 +115,7 @@ st.divider()
 
 # --- ESTRUTURA DE EXIBIÇÃO (ABAS PARA ADMIN, PÁGINA ÚNICA PARA CLIENTE) ---
 if user["perfil"] == "admin":
-    tabs = st.tabs(["📊 Visão Executiva", "🎓 Qualidade & Operação", "💰 Posição Financeira"])
+    tabs = st.tabs(["📊 Visão Geral", "🎓 Operação", "💰 Financeira"])
     container_executiva = tabs[0]
     container_operacional = tabs[1]
     container_financeira = tabs[2]
@@ -139,14 +139,14 @@ hover_style = dict(
 with container_executiva:
     
     if user["perfil"] == "admin":
-        st.markdown("#### 💼 Funil Financeiro (Visão Interna)")
+        st.markdown("#### 💼 Financeiro")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Faturamento Realizado", f"R$ {df_kpis['total_faturado'].iloc[0]:,.2f}")
         c2.metric("Futuro Agendado", f"R$ {df_kpis['futuro_agendado'].iloc[0]:,.2f}")
         c3.metric("Futuro Lançado", f"R$ {df_kpis['futuro_lancado'].iloc[0]:,.2f}")
         c4.metric("Pendências (Gargalo)", f"R$ {df_kpis['total_pendencia'].iloc[0]:,.2f}")
     else:
-        st.markdown("#### 💼 Resumo de Investimento")
+        st.markdown("#### 💼 Investimento")
         c1, c2, c3 = st.columns(3)
         c1.metric("Investimento Realizado (Turmas Concluídas)", f"R$ {df_kpis['total_faturado'].iloc[0]:,.2f}")
         investimento_futuro = df_kpis['futuro_agendado'].iloc[0] + df_kpis['futuro_lancado'].iloc[0]
@@ -155,7 +155,7 @@ with container_executiva:
 
     st.divider()
 
-    st.markdown("#### ⚙️ Entregas e Qualidade (Realizado)")
+    st.markdown("#### ⚙️ Entregas (Realizado)")
     
     if user["perfil"] == "admin":
         c5, c6, c7, c8, c9 = st.columns(5)
