@@ -236,3 +236,53 @@ def buscar_ranking_instrutores(engine, grupo_cliente=None, unidade=None, data_in
     )
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
+
+def buscar_detalhamento_financeiro(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
+    complemento_where = " AND " if where_clause else " WHERE "
+    
+    # Trazemos tudo que não seja cancelamento absoluto, para o financeiro ver o funil real
+    where_clause += f"{complemento_where} UPPER(TRIM(fc.validacao)) NOT IN ('REAGENDADO', 'CANCELADO')"
+
+    query = text(
+        f"""
+        SELECT 
+            fc.processo AS "Processo",
+            fc.grupo AS "Grupo",
+            fc.unidade AS "Unidade",
+            fc.termino_1 AS "Data Término",
+            UPPER(TRIM(fc.validacao)) AS "Validação (Operação)",
+            COALESCE(UPPER(TRIM(fc.status_comercial)), 'PENDENTE') AS "Status Comercial",
+            CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) AS "Valor (R$)"
+        FROM public.fato_comercial fc
+        {where_clause}
+        ORDER BY TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') DESC
+    """
+    )
+    with engine.connect() as conn:
+        return pd.read_sql_query(query, conn, params=params)
+
+def buscar_lista_participantes(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
+    complemento_where = " AND " if where_clause else " WHERE "
+
+    # Cruza os filtros com a regra de "Turma Realizada" e garante que o nome não está vazio
+    where_clause += f"{complemento_where} {regra_operacional} AND ft.nome_do_participante IS NOT NULL AND TRIM(CAST(ft.nome_do_participante AS TEXT)) != ''"
+
+    query = text(
+        f"""
+        SELECT 
+            ft.nome_do_participante AS "Nome do Participante",
+            ft.cpf AS "CPF",
+            ft.nr AS "Treinamento (NR)",
+            ft.tipo AS "Tipo",
+            fc.termino_1 AS "Data Conclusão",
+            fc.unidade AS "Unidade"
+        FROM public.fato_treinamentos ft
+        INNER JOIN public.fato_comercial fc ON ft.processo = fc.processo
+        {where_clause}
+        ORDER BY TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') DESC, ft.nome_do_participante ASC
+    """
+    )
+    with engine.connect() as conn:
+        return pd.read_sql_query(query, conn, params=params)

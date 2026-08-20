@@ -13,6 +13,8 @@ from queries import (
     buscar_kpis,
     buscar_proximas_turmas,
     buscar_ranking_instrutores,
+    buscar_detalhamento_financeiro,
+    buscar_lista_participantes,
 )
 
 st.set_page_config(
@@ -110,6 +112,12 @@ df_proximas = buscar_proximas_turmas(
 df_instrutores = buscar_ranking_instrutores(
     engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
 )
+df_financeiro = buscar_detalhamento_financeiro(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
+)
+df_participantes = buscar_lista_participantes(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
+)
 
 st.divider()
 
@@ -155,20 +163,30 @@ with container_executiva:
 
     st.divider()
 
-    st.markdown("#### ⚙️ Entregas (Realizado)")
+    # O erro de indentação começava aqui. Agora está tudo alinhado dentro do 'with container_executiva:'
+    st.markdown("#### ⚙️ Entregas e Qualidade (Realizado)")
     
     if user["perfil"] == "admin":
         c5, c6, c7, c8, c9 = st.columns(5)
-        c5.metric("Turmas Realizadas", f"{df_kpis['turmas_realizadas'].iloc[0]:,}")
-        c6.metric("Horas Treinamento", f"{df_kpis['horas_realizadas'].iloc[0]:,.0f}h")
-        c7.metric("Pessoas Treinadas", f"{df_kpis['pessoas_treinadas'].iloc[0]:,}")
+        turmas_fmt = f"{int(df_kpis['turmas_realizadas'].iloc[0]):,}".replace(",", ".")
+        horas_fmt = f"{int(df_kpis['horas_realizadas'].iloc[0]):,}".replace(",", ".")
+        pessoas_fmt = f"{int(df_kpis['pessoas_treinadas'].iloc[0]):,}".replace(",", ".")
+        unidades_fmt = f"{int(df_kpis['unidades_atendidas'].iloc[0]):,}".replace(",", ".")
+        
+        c5.metric("Turmas Realizadas", turmas_fmt)
+        c6.metric("Horas Treinamento", f"{horas_fmt}h")
+        c7.metric("Pessoas Treinadas", pessoas_fmt)
         c8.metric("Aproveitamento Médio", f"{df_kpis['aproveitamento_medio'].iloc[0] or 0:.2f} ⭐")
-        c9.metric("Unidades Atendidas", f"{df_kpis['unidades_atendidas'].iloc[0]:,}")
+        c9.metric("Unidades Atendidas", unidades_fmt)
     else:
         c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Turmas Realizadas", f"{df_kpis['turmas_realizadas'].iloc[0]:,}")
-        c6.metric("Pessoas Treinadas (Certificados)", f"{df_kpis['pessoas_treinadas'].iloc[0]:,}")
-        c7.metric("Carga Horária Consumida", f"{df_kpis['horas_realizadas'].iloc[0]:,.0f}h")
+        turmas_fmt = f"{int(df_kpis['turmas_realizadas'].iloc[0]):,}".replace(",", ".")
+        pessoas_fmt = f"{int(df_kpis['pessoas_treinadas'].iloc[0]):,}".replace(",", ".")
+        horas_fmt = f"{int(df_kpis['horas_realizadas'].iloc[0]):,}".replace(",", ".")
+        
+        c5.metric("Turmas Realizadas", turmas_fmt)
+        c6.metric("Pessoas Treinadas (Certificados)", pessoas_fmt)
+        c7.metric("Carga Horária Consumida", f"{horas_fmt}h")
         c8.metric("Nota Média (Qualidade)", f"{df_kpis['aproveitamento_medio'].iloc[0] or 0:.2f} ⭐")
 
     st.divider()
@@ -227,11 +245,55 @@ with container_executiva:
 # ==========================================
 with container_operacional:
     
-    # Se for cliente, colocamos um divisor e título para separar o conteúdo na mesma página
     if user["perfil"] != "admin":
         st.divider()
         st.markdown("### 🎓 Qualidade Operacional")
         
+    # --- 1. RELAÇÃO DE ALUNOS (AGORA NO TOPO) ---
+    st.subheader("👥 Relação de Colaboradores Treinados")
+    st.caption("Lista consolidada de todos os participantes que concluíram os treinamentos.")
+
+    if 'df_participantes' not in locals() or df_participantes.empty:
+        st.info("Nenhum participante encontrado para os filtros selecionados.")
+    else:
+        pesquisa_nome = st.text_input("🔍 Buscar participante por Nome ou CPF (digite apenas os números):", placeholder="Ex: João ou 12345678900")
+        
+        df_exibir = df_participantes.copy()
+        
+        # 1. Aplica o filtro de pesquisa na base original (antes de mascarar)
+        if pesquisa_nome:
+            mascara = df_exibir["Nome do Participante"].astype(str).str.contains(pesquisa_nome, case=False, na=False) | \
+                      df_exibir["CPF"].astype(str).str.contains(pesquisa_nome, na=False)
+            df_exibir = df_exibir[mascara]
+            
+        # 2. Função para aplicar a máscara LGPD (***.456.789-**)
+        def aplicar_mascara_lgpd(cpf):
+            # Limpa qualquer ponto ou traço que possa vir do banco
+            cpf_str = str(cpf).replace('.', '').replace('-', '').strip()
+            
+            if len(cpf_str) == 11:
+                return f"***.{cpf_str[3:6]}.{cpf_str[6:9]}-**"
+            elif cpf_str and cpf_str.lower() != 'nan' and cpf_str.lower() != 'none':
+                # Se o CPF não tiver 11 dígitos, esconde tudo por segurança
+                return "***.***.***-**" 
+            return ""
+
+        # 3. Substitui a coluna CPF pela versão protegida para exibição
+        df_exibir["CPF"] = df_exibir["CPF"].apply(aplicar_mascara_lgpd)
+            
+        st.dataframe(
+            df_exibir,
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config={
+                "CPF": st.column_config.TextColumn("CPF (Protegido)") 
+            }
+        )
+
+    st.divider()
+        
+    # --- 2. INSTRUTORES (AGORA EMBAIXO) ---
     st.subheader("👨‍🏫 Desempenho e Volume por Instrutor")
     st.caption("Acompanhe o volume de turmas realizadas e as notas médias de avaliação técnica.")
     
@@ -271,4 +333,106 @@ with container_operacional:
 # ==========================================
 if container_financeira:
     with container_financeira:
-        st.info("💡 Esta aba conterá a gestão detalhada de Pedidos de Compra (PO), NFs e Funil de Faturamento do Grupo Querino.")
+        st.subheader("💰 Gestão de Faturamento e Pendências")
+        st.caption("Acompanhe o detalhamento financeiro e utilize os filtros para focar nas cobranças.")
+        
+        if df_financeiro.empty:
+            st.info("Nenhum dado financeiro encontrado para os filtros globais selecionados.")
+        else:
+# --- 1. CRIANDO A BARRA DE FILTROS ESPECÍFICA DA ABA ---
+            st.markdown("##### 🔍 Filtros Financeiros")
+            
+            def extrair_mes_ano(dt):
+                if pd.isna(dt) or not isinstance(dt, str) or len(dt.strip()) < 10:
+                    return "Sem Data"
+                return dt.strip()[3:10]
+                
+            df_financeiro["Mes_Ano"] = df_financeiro["Data Término"].apply(extrair_mes_ano)
+            
+            cf1, cf2, cf3 = st.columns(3)
+            
+            with cf1:
+                status_opcoes = sorted(df_financeiro["Status Comercial"].dropna().unique().tolist())
+                status_selecionados = st.multiselect(
+                    "Status Comercial (Vazio = Todos):",
+                    options=status_opcoes,
+                    default=[] # <-- Vazio por padrão para não poluir a tela
+                )
+                
+            with cf2:
+                grupo_opcoes = sorted(df_financeiro["Grupo"].dropna().unique().tolist())
+                grupo_selecionados = st.multiselect(
+                    "Grupo / Cliente (Vazio = Todos):",
+                    options=grupo_opcoes,
+                    default=[] # <-- Vazio por padrão
+                )
+                
+            with cf3:
+                mes_opcoes = sorted(df_financeiro["Mes_Ano"].unique().tolist())
+                mes_selecionados = st.multiselect(
+                    "Mês / Ano do Término (Vazio = Todos):",
+                    options=mes_opcoes,
+                    default=[] # <-- Vazio por padrão
+                )
+
+# --- 2. APLICANDO OS FILTROS AO DATAFRAME ---
+            # Começamos com a base completa
+            df_fin_filtrado = df_financeiro.copy()
+            
+            # Só aplicamos o filtro se o usuário escolheu algo na caixinha
+            if status_selecionados:
+                df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Status Comercial"].isin(status_selecionados)]
+                
+            if grupo_selecionados:
+                df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Grupo"].isin(grupo_selecionados)]
+                
+            if mes_selecionados:
+                df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Mes_Ano"].isin(mes_selecionados)]
+            
+            st.divider()
+
+            # --- 3. EXIBINDO GRÁFICOS E TABELA COM OS DADOS FILTRADOS ---
+            mascara_pendencia = (
+                df_fin_filtrado["Validação (Operação)"].isin(['FATURAR', 'CANCELADO DIA', 'CANCELADO 24H']) & 
+                (df_fin_filtrado["Status Comercial"] != 'OK')
+            )
+            df_pendencias = df_fin_filtrado[mascara_pendencia]
+            
+            f1, f2 = st.columns([1, 1.8])
+            
+            with f1:
+                st.markdown("##### Resumo")
+                if df_fin_filtrado.empty:
+                    st.warning("Sem dados para este filtro.")
+                else:
+                    resumo_status = df_fin_filtrado.groupby("Status Comercial")["Valor (R$)"].sum().reset_index()
+                    resumo_status = resumo_status.sort_values(by="Valor (R$)", ascending=True)
+                    
+                    fig_status = px.bar(
+                        resumo_status,
+                        y="Status Comercial",
+                        x="Valor (R$)",
+                        orientation="h",
+                        text_auto=".2s",
+                        color="Status Comercial",
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_status.update_layout(showlegend=False, xaxis_title="Valor (R$)", yaxis_title="")
+                    st.plotly_chart(fig_status, use_container_width=True)
+                
+            with f2:
+                st.markdown(f"##### ⚠️ Fila de Cobrança (Gargalo: {len(df_pendencias)} processos)")
+                if df_pendencias.empty:
+                    st.success("Tudo certo! Nenhuma pendência de faturamento encontrada para os filtros aplicados.")
+                else:
+                    st.dataframe(
+                        df_pendencias.drop(columns=["Mes_Ano"]),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Processo": st.column_config.TextColumn("Processo", width="small"),
+                            "Data Término": st.column_config.TextColumn("Término", width="small"),
+                            "Valor (R$)": st.column_config.NumberColumn("Valor", format="R$ %.2f")
+                        },
+                        height=350
+                    )
