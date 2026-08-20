@@ -266,7 +266,6 @@ def buscar_lista_participantes(engine, grupo_cliente=None, unidade=None, data_in
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
 
-    # Cruza os filtros com a regra de "Turma Realizada" e garante que o nome não está vazio
     where_clause += f"{complemento_where} {regra_operacional} AND ft.nome_do_participante IS NOT NULL AND TRIM(CAST(ft.nome_do_participante AS TEXT)) != ''"
 
     query = text(
@@ -274,6 +273,7 @@ def buscar_lista_participantes(engine, grupo_cliente=None, unidade=None, data_in
         SELECT 
             ft.nome_do_participante AS "Nome do Participante",
             ft.cpf AS "CPF",
+            fc.grupo AS "Grupo", -- <--- ADICIONE ESTA LINHA AQUI
             ft.nr AS "Treinamento (NR)",
             ft.tipo AS "Tipo",
             fc.termino_1 AS "Data Conclusão",

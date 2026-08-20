@@ -248,85 +248,94 @@ with container_operacional:
     if user["perfil"] != "admin":
         st.divider()
         st.markdown("### 🎓 Qualidade Operacional")
-        
-    # --- 1. RELAÇÃO DE ALUNOS (AGORA NO TOPO) ---
-    st.subheader("👥 Relação de Colaboradores Treinados")
-    st.caption("Lista consolidada de todos os participantes que concluíram os treinamentos.")
 
-    if 'df_participantes' not in locals() or df_participantes.empty:
-        st.info("Nenhum participante encontrado para os filtros selecionados.")
-    else:
-        pesquisa_nome = st.text_input("🔍 Buscar participante por Nome ou CPF (digite apenas os números):", placeholder="Ex: João ou 12345678900")
-        
-        df_exibir = df_participantes.copy()
-        
-        # 1. Aplica o filtro de pesquisa na base original (antes de mascarar)
-        if pesquisa_nome:
-            mascara = df_exibir["Nome do Participante"].astype(str).str.contains(pesquisa_nome, case=False, na=False) | \
-                      df_exibir["CPF"].astype(str).str.contains(pesquisa_nome, na=False)
-            df_exibir = df_exibir[mascara]
-            
-        # 2. Função para aplicar a máscara LGPD (***.456.789-**)
-        def aplicar_mascara_lgpd(cpf):
-            # Limpa qualquer ponto ou traço que possa vir do banco
-            cpf_str = str(cpf).replace('.', '').replace('-', '').strip()
-            
-            if len(cpf_str) == 11:
-                return f"***.{cpf_str[3:6]}.{cpf_str[6:9]}-**"
-            elif cpf_str and cpf_str.lower() != 'nan' and cpf_str.lower() != 'none':
-                # Se o CPF não tiver 11 dígitos, esconde tudo por segurança
-                return "***.***.***-**" 
-            return ""
+    # --- FUNÇÃO 1: DESENHA A LISTA DE ALUNOS ---
+    def renderizar_alunos():
+        st.subheader("👥 Relação de Colaboradores Treinados")
+        st.caption("Lista consolidada de todos os participantes que concluíram os treinamentos.")
 
-        # 3. Substitui a coluna CPF pela versão protegida para exibição
-        df_exibir["CPF"] = df_exibir["CPF"].apply(aplicar_mascara_lgpd)
+        # CORREÇÃO: Removido o locals(). O Python agora enxerga a variável global!
+        if df_participantes.empty:
+            st.info("Nenhum participante encontrado para os filtros selecionados.")
+        else:
+            pesquisa_nome = st.text_input("🔍 Buscar participante por Nome ou CPF (digite apenas os números):", placeholder="Ex: João ou 12345678900", key="busca_aluno")
             
-        st.dataframe(
-            df_exibir,
-            use_container_width=True,
-            hide_index=True,
-            height=400,
-            column_config={
-                "CPF": st.column_config.TextColumn("CPF (Protegido)") 
-            }
-        )
+            df_exibir = df_participantes.copy()
+            
+            if pesquisa_nome:
+                mascara = df_exibir["Nome do Participante"].astype(str).str.contains(pesquisa_nome, case=False, na=False) | \
+                          df_exibir["CPF"].astype(str).str.contains(pesquisa_nome, na=False)
+                df_exibir = df_exibir[mascara]
+                
+            def aplicar_mascara_lgpd(cpf):
+                cpf_str = str(cpf).replace('.', '').replace('-', '').strip()
+                if len(cpf_str) == 11:
+                    return f"***.{cpf_str[3:6]}.{cpf_str[6:9]}-**"
+                elif cpf_str and cpf_str.lower() != 'nan' and cpf_str.lower() != 'none':
+                    return "***.***.***-**" 
+                return ""
 
-    st.divider()
-        
-    # --- 2. INSTRUTORES (AGORA EMBAIXO) ---
-    st.subheader("👨‍🏫 Desempenho e Volume por Instrutor")
-    st.caption("Acompanhe o volume de turmas realizadas e as notas médias de avaliação técnica.")
-    
-    if df_instrutores.empty:
-        st.info("Nenhum dado de operação encontrado para os filtros selecionados.")
-    else:
-        df_top_instrutores = df_instrutores.head(10).sort_values(by="turmas_realizadas", ascending=True)
-        
-        o1, o2 = st.columns([1.5, 1])
-        
-        with o1:
-            fig_inst = px.bar(
-                df_top_instrutores, x="turmas_realizadas", y="instrutor", orientation="h",
-                title="Top 10 Instrutores (Por Volume de Turmas)", text="turmas_realizadas",
-                color_discrete_sequence=["#38bdf8"]
-            )
-            fig_inst.update_layout(hoverlabel=hover_style)
-            st.plotly_chart(fig_inst, use_container_width=True)
+            df_exibir["CPF"] = df_exibir["CPF"].apply(aplicar_mascara_lgpd)
             
-        with o2:
-            st.write("**Tabela Geral de Qualidade**")
+            # Oculta a coluna Grupo se for cliente
+            if user["perfil"] != "admin" and "Grupo" in df_exibir.columns:
+                df_exibir = df_exibir.drop(columns=["Grupo"])
+                
             st.dataframe(
-                df_instrutores,
+                df_exibir,
                 use_container_width=True,
                 hide_index=True,
+                height=400,
                 column_config={
-                    "instrutor": "Nome do Instrutor",
-                    "turmas_realizadas": st.column_config.NumberColumn("Turmas", format="%d"),
-                    "pessoas_treinadas": st.column_config.NumberColumn("Alunos", format="%d"),
-                    "nota_media": st.column_config.NumberColumn("Nota Média", format="%.2f ⭐", help="Média técnica calculada por aluno."),
-                },
-                height=350
+                    "CPF": st.column_config.TextColumn("CPF (Protegido)") 
+                }
             )
+
+    # --- FUNÇÃO 2: DESENHA OS INSTRUTORES ---
+    def renderizar_instrutores():
+        st.subheader("👨‍🏫 Desempenho e Volume por Instrutor")
+        st.caption("Acompanhe o volume de turmas realizadas e as notas médias de avaliação técnica.")
+        
+        if df_instrutores.empty:
+            st.info("Nenhum dado de operação encontrado para os filtros selecionados.")
+        else:
+            df_top_instrutores = df_instrutores.head(10).sort_values(by="turmas_realizadas", ascending=True)
+            
+            o1, o2 = st.columns([1.5, 1])
+            
+            with o1:
+                fig_inst = px.bar(
+                    df_top_instrutores, x="turmas_realizadas", y="instrutor", orientation="h",
+                    title="Top 10 Instrutores (Por Volume de Turmas)", text="turmas_realizadas",
+                    color_discrete_sequence=["#38bdf8"]
+                )
+                fig_inst.update_layout(hoverlabel=hover_style)
+                st.plotly_chart(fig_inst, use_container_width=True)
+                
+            with o2:
+                st.write("**Tabela Geral de Qualidade**")
+                st.dataframe(
+                    df_instrutores,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "instrutor": "Nome do Instrutor",
+                        "turmas_realizadas": st.column_config.NumberColumn("Turmas", format="%d"),
+                        "pessoas_treinadas": st.column_config.NumberColumn("Alunos", format="%d"),
+                        "nota_media": st.column_config.NumberColumn("Nota Média", format="%.2f ⭐", help="Média técnica calculada por aluno."),
+                    },
+                    height=350
+                )
+
+    # --- LÓGICA DE ORDEM CONDICIONAL ---
+    if user["perfil"] == "admin":
+        renderizar_instrutores()
+        st.divider()
+        renderizar_alunos() # Alunos por baixo para o Admin
+    else:
+        renderizar_alunos() # Alunos por cima para o Cliente
+        st.divider()
+        renderizar_instrutores()
 
 # ==========================================
 # BLOCO 3: POSIÇÃO FINANCEIRA
