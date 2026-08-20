@@ -94,40 +94,56 @@ def tela_login():
                         else:
                             st.error("E-mail ou senha incorretos.")
 
-        with aba_esqueci:
-            st.write(
-                "Para garantir a segurança dos dados corporativos, as redefinições de acesso são auditadas."
-            )
-            email_recupera = st.text_input(
-                "Informe seu E-mail de Cadastro", key="recup_email"
-            )
-            
-            if st.button("Gravar Solicitação", use_container_width=True):
-                if email_recupera:
-                    engine = get_engine()
-                    registrar_log(
-                        engine,
-                        "SOLICITACAO_REDEFINICAO_SENHA",
-                        email_recupera,
-                        None,
-                        "Solicitou redefinição pela tela inicial",
-                    )
-                    st.success("✅ Solicitação de redefinição gravada com segurança em nosso sistema.")
-                    
-                    st.info(
-                        "**Próximo passo:**\n"
-                        "Para agilizar o seu atendimento, clique no botão abaixo e notifique o administrador ou o comercial do Grupo Querino via WhatsApp."
-                    )
-                    
-                    # Número de suporte/comercial para onde o cliente será direcionado (Ex: 55 + DDD + Numero)
-                    numero_whatsapp = "551921442321" 
-                    mensagem = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera}"
-                    link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={mensagem.replace(' ', '%20')}"
-                    
-                    st.link_button("📱 Notificar Suporte (WhatsApp)", link_whatsapp, use_container_width=True)
-                    
-                else:
-                    st.warning("Por favor, informe seu e-mail de cadastro primeiro.")
+            with aba_esqueci:
+                st.write(
+                    "Para garantir a segurança dos dados corporativos, as redefinições de acesso são auditadas."
+                )
+                email_recupera = st.text_input(
+                    "Informe seu E-mail de Cadastro", key="recup_email"
+                )
+                # Novo campo para o Grupo
+                grupo_recupera = st.text_input(
+                    "Informe o Grupo / Empresa", key="recup_grupo"
+                )
+                
+                if st.button("Gravar Solicitação", use_container_width=True):
+                    if email_recupera and grupo_recupera:
+                        engine = get_engine()
+                        registrar_log(
+                            engine,
+                            "SOLICITACAO_REDEFINICAO_SENHA",
+                            email_recupera,
+                            None,
+                            f"Solicitou redefinição pela tela inicial. Grupo informado: {grupo_recupera}",
+                        )
+                        st.success("✅ Solicitação de redefinição gravada com segurança em nosso sistema.")
+                        
+                        st.info(
+                            "**Próximo passo:**\n"
+                            "Para agilizar o seu atendimento, clique em uma das opções abaixo para notificar nossa equipe de suporte."
+                        )
+                        
+                        # --- CONFIGURAÇÃO WHATSAPP ---
+                        numero_whatsapp = "5519999999999" # Mude para o número do suporte
+                        msg_zap = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera} (Grupo: {grupo_recupera})"
+                        link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={msg_zap.replace(' ', '%20')}"
+                        
+                        # --- CONFIGURAÇÃO E-MAIL (Mailto) ---
+                        email_suporte = "suporte@grupoquerino.com.br" # Mude para o e-mail do suporte
+                        assunto = "Redefinição de Senha - Portal BI"
+                        # O %0D%0A serve para pular linha no corpo do e-mail
+                        corpo_email = f"Olá equipe,%0D%0A%0D%0ASolicito a redefinição de senha do meu acesso ao Portal de B.I.%0D%0A%0D%0AE-mail: {email_recupera}%0D%0AGrupo: {grupo_recupera}"
+                        link_email = f"mailto:{email_suporte}?subject={assunto.replace(' ', '%20')}&body={corpo_email.replace(' ', '%20')}"
+                        
+                        # Colocando os botões lado a lado
+                        col_wpp, col_email = st.columns(2)
+                        with col_wpp:
+                            st.link_button("📱 Notificar via WhatsApp", link_whatsapp, use_container_width=True)
+                        with col_email:
+                            st.link_button("📧 Notificar via E-mail", link_email, use_container_width=True)
+                        
+                    else:
+                        st.warning("Por favor, informe seu E-mail e o nome do Grupo/Empresa.")
 
 
 # --- Configuração das Páginas e Navegação ---
