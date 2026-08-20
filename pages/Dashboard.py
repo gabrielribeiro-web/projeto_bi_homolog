@@ -85,7 +85,7 @@ with f2:
         df_unidades = pd.read_sql_query(query_unidades, engine)
 
     unidade_sel = st.selectbox(
-        "Unidade / Planta:", ["Todas"] + df_unidades["unidade"].tolist()
+        "Unidade :", ["Todas"] + df_unidades["unidade"].tolist()
     )
 
 with f3:
