@@ -153,14 +153,15 @@ def buscar_distribuicao_tipo(engine, grupo_cliente=None, unidade=None, data_inic
 def buscar_investimento_mensal(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
-    # O gráfico financeiro mensal deve englobar o funil real, tirando cancelamentos absolutos (que não cobram)
-    where_clause += f"{complemento_where} UPPER(TRIM(fc.validacao)) NOT IN ('REAGENDADO', 'CANCELADO')"
+    
+    # Aplica exatamente a mesma regra operacional (apenas turmas já realizadas)
+    where_clause += f"{complemento_where} {regra_operacional}"
 
     query = text(
         f"""
         SELECT 
-            TO_CHAR(TO_DATE(fc.inicio_1, 'DD/MM/YYYY'), 'MM/YYYY') AS mes_ano,
-            DATE_TRUNC('month', TO_DATE(fc.inicio_1, 'DD/MM/YYYY')) AS mes_dt,
+            TO_CHAR(TO_DATE(fc.termino_1, 'DD/MM/YYYY'), 'MM/YYYY') AS mes_ano,
+            DATE_TRUNC('month', TO_DATE(fc.termino_1, 'DD/MM/YYYY')) AS mes_dt,
             COUNT(DISTINCT fc.processo) AS turmas,
             SUM(CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS investimento
         FROM public.fato_comercial fc
@@ -177,8 +178,9 @@ def buscar_investimento_mensal(engine, grupo_cliente=None, unidade=None, data_in
 def buscar_proximas_turmas(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
-    # A tabela exibe turmas Agendadas (Confirmado) ou Lançadas (Branco) cujo início seja > Hoje
-    where_clause += f"{complemento_where} (UPPER(TRIM(fc.validacao)) = 'CONFIRMADO' OR fc.validacao IS NULL OR TRIM(fc.validacao) = '') AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE"
+    
+    # Regra estrita da liderança: APENAS Confirmado + Data Início > Hoje
+    where_clause += f"{complemento_where} UPPER(TRIM(fc.validacao)) = 'CONFIRMADO' AND NULLIF(fc.inicio_1, '') IS NOT NULL AND TO_DATE(fc.inicio_1, 'DD/MM/YYYY') > CURRENT_DATE"
 
     query = text(
         f"""
