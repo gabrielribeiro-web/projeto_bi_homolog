@@ -96,12 +96,13 @@ def tela_login():
 
         with aba_esqueci:
             st.write(
-                "Digite seu e-mail cadastrado para solicitar a redefinição de acesso:"
+                "Para garantir a segurança dos dados corporativos, as redefinições de acesso são auditadas."
             )
             email_recupera = st.text_input(
-                "E-mail de Cadastro", key="recup_email"
+                "Informe seu E-mail de Cadastro", key="recup_email"
             )
-            if st.button("Solicitar Redefinição", use_container_width=True):
+            
+            if st.button("Gravar Solicitação", use_container_width=True):
                 if email_recupera:
                     engine = get_engine()
                     registrar_log(
@@ -111,11 +112,22 @@ def tela_login():
                         None,
                         "Solicitou redefinição pela tela inicial",
                     )
+                    st.success("✅ Solicitação de redefinição gravada com segurança em nosso sistema.")
+                    
                     st.info(
-                        "Solicitação registrada. Se o e-mail estiver correto na base, uma nova senha provisória será gerada pela equipe de TI/Atendimento."
+                        "**Próximo passo:**\n"
+                        "Para agilizar o seu atendimento, clique no botão abaixo e notifique o administrador ou o comercial do Grupo Querino via WhatsApp."
                     )
+                    
+                    # Número de suporte/comercial para onde o cliente será direcionado (Ex: 55 + DDD + Numero)
+                    numero_whatsapp = "551921442321" 
+                    mensagem = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera}"
+                    link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={mensagem.replace(' ', '%20')}"
+                    
+                    st.link_button("📱 Notificar Suporte (WhatsApp)", link_whatsapp, use_container_width=True)
+                    
                 else:
-                    st.warning("Informe o e-mail.")
+                    st.warning("Por favor, informe seu e-mail de cadastro primeiro.")
 
 
 # --- Configuração das Páginas e Navegação ---

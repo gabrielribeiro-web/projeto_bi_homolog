@@ -172,3 +172,20 @@ def alterar_senha_primeiro_acesso(
         return True, "Senha alterada com sucesso!"
     except Exception as e:
         return False, f"Erro ao atualizar senha no banco: {e}"
+
+def solicitar_redefinicao_senha(engine, email):
+    """Grava o pedido de reset de senha no banco de dados por segurança."""
+    ip = obter_ip_cliente()
+    email_limpo = email.strip().lower()
+    
+    query = text("""
+        INSERT INTO public.tb_solicitacoes_senha (email, ip_origem)
+        VALUES (:email, :ip)
+    """)
+    
+    try:
+        with engine.begin() as conn:
+            conn.execute(query, {"email": email_limpo, "ip": ip})
+        return True, "Solicitação registrada com sucesso! A equipe administrativa foi notificada."
+    except Exception as e:
+        return False, f"Erro ao registrar solicitação: {e}"
