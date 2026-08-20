@@ -1,137 +1,137 @@
-import os
-import bcrypt
-import pandas as pd
 import streamlit as st
-from sqlalchemy import create_engine, text
+from auth import alterar_senha_primeiro_acesso, autenticar_usuario, registrar_log
+from database import get_engine
 
-# 1. Configuração da Página
 st.set_page_config(
-    page_title="Portal B.I. - Grupo Querino", page_icon="📊", layout="wide"
+    page_title="Portal Dashboard. - Grupo Querino", page_icon="📊", layout="wide"
 )
 
-# 2. Conexão com o Banco de Dados (Supabase)
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres.dychhsqpvqtwaslujbir:Acess%40bi2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require",
-)
-
-
-@st.cache_resource
-def get_engine():
-    return create_engine(DATABASE_URL)
-
-
-engine = get_engine()
-
-
-# 3. Funções de Criptografia e Autenticação
-def gerar_hash_senha(senha_plana: str) -> str:
-    salt = bcrypt.gensalt(12)
-    return bcrypt.hashpw(senha_plana.encode("utf-8"), salt).decode("utf-8")
-
-
-def autenticar_usuario(email, senha_informada):
-    query = text(
-        """
-        SELECT id, nome, email, senha_hash, perfil, ativo 
-        FROM public.tb_usuarios 
-        WHERE email = :email
-    """
-    )
-    with engine.connect() as conn:
-        res = conn.execute(query, {"email": email}).fetchone()
-        if res:
-            hash_salvo = res.senha_hash
-
-            try:
-                senha_valida = bcrypt.checkpw(
-                    senha_informada.encode("utf-8"), hash_salvo.encode("utf-8")
-                )
-            except ValueError:
-                senha_valida = hash_salvo == senha_informada
-
-            if senha_valida:
-                return {
-                    "id": res.id,
-                    "nome": res.nome,
-                    "email": res.email,
-                    "perfil": res.perfil,
-                    "ativo": res.ativo,
-                }
-    return None
-
-
-# 4. Controle de Sessão
 if "usuario_logado" not in st.session_state:
     st.session_state["usuario_logado"] = None
 
 
-# 5. Interface de Login
-def exibir_login():
-    col1, col2, col3 = st.columns([1, 2, 1])
+def tela_login():
+    st.markdown(
+        "<style>[data-testid='stSidebar'] {display: none;}</style>",
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+
     with col2:
-        st.subheader("🔑 Acesso ao Portal de B.I.")
-        st.write("Insira suas credenciais do Grupo Querino para continuar.")
+        st.write("")
+        st.write("")
 
-        with st.form("form_login"):
-            email_input = st.text_input("E-mail")
-            senha_input = st.text_input("Senha", type="password")
-            botao_submit = st.form_submit_button("Entrar")
+        # CASO 1: Usuário logado precisando alterar a senha no PRIMEIRO ACESSO
+        user = st.session_state.get("usuario_logado")
+        if user and user.get("primeiro_acesso") == 1:
+            st.warning("🔒 **Primeiro Acesso Detectado**")
+            st.caption(
+                "Por motivos de segurança, altere a senha provisória fornecida para continuar."
+            )
 
-            if botao_submit:
-                if not email_input or not senha_input:
-                    st.warning("Por favor, preencha todos os campos.")
-                else:
-                    user = autenticar_usuario(email_input, senha_input)
-                    if user:
-                        if int(user["ativo"]) == 0:
-                            st.error(
-                                "Usuário inativo. Entre em contato com o suporte."
-                            )
-                        else:
-                            st.session_state["usuario_logado"] = user
-                            st.rerun()
+            with st.form("form_troca_obrigatoria"):
+                senha_atual = st.text_input(
+                    "Senha Provisória Atual", type="password"
+                )
+                nova_senha = st.text_input("Nova Senha", type="password")
+                confirma_senha = st.text_input(
+                    "Confirme a Nova Senha", type="password"
+                )
+                btn_alterar = st.form_submit_button(
+                    "Salvar Nova Senha e Continuar", use_container_width=True
+                )
+
+                if btn_alterar:
+                    if not senha_atual or not nova_senha or not confirma_senha:
+                        st.error("Preencha todos os campos.")
+                    elif nova_senha != confirma_senha:
+                        st.error("A nova senha e a confirmação não coincidem.")
+                    elif len(nova_senha) < 6:
+                        st.error(
+                            "A nova senha deve ter no mínimo 6 caracteres."
+                        )
                     else:
-                        st.error("E-mail ou senha incorretos.")
+                        sucesso, msg = alterar_senha_primeiro_acesso(
+                            user["id"], senha_atual, nova_senha, user["email"]
+                        )
+                        if sucesso:
+                            st.session_state["usuario_logado"][
+                                "primeiro_acesso"
+                            ] = 0
+                            st.success(
+                                "Senha atualizada! Redirecionando..."
+                            )
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            return
+
+        # CASO 2: Tela de Login Convencional
+        st.subheader("🔑 Acesso ao Portal de Dashboard.")
+        st.caption("Insira suas credenciais para continuar.")
+
+        aba_login, aba_esqueci = st.tabs(
+            ["Entrar", "❓ Esqueci minha senha"]
+        )
+
+        with aba_login:
+            with st.form("form_login"):
+                email_input = st.text_input("E-mail")
+                senha_input = st.text_input("Senha", type="password")
+                botao_submit = st.form_submit_button(
+                    "Entrar", use_container_width=True
+                )
+
+                if botao_submit:
+                    if not email_input or not senha_input:
+                        st.warning("Preencha todos os campos.")
+                    else:
+                        usuario = autenticar_usuario(email_input, senha_input)
+                        if usuario:
+                            st.session_state["usuario_logado"] = usuario
+                            st.rerun()
+                        else:
+                            st.error("E-mail ou senha incorretos.")
+
+        with aba_esqueci:
+            st.write(
+                "Digite seu e-mail cadastrado para solicitar a redefinição de acesso:"
+            )
+            email_recupera = st.text_input(
+                "E-mail de Cadastro", key="recup_email"
+            )
+            if st.button("Solicitar Redefinição", use_container_width=True):
+                if email_recupera:
+                    engine = get_engine()
+                    registrar_log(
+                        engine,
+                        "SOLICITACAO_REDEFINICAO_SENHA",
+                        email_recupera,
+                        None,
+                        "Solicitou redefinição pela tela inicial",
+                    )
+                    st.info(
+                        "Solicitação registrada. Se o e-mail estiver correto na base, uma nova senha provisória será gerada pela equipe de TI/Atendimento."
+                    )
+                else:
+                    st.warning("Informe o e-mail.")
 
 
-# 6. Painel Principal com Power BI Incorporado
-def exibir_painel():
-    user = st.session_state["usuario_logado"]
+# --- Configuração das Páginas e Navegação ---
+pg_login = st.Page(tela_login, title="Login", icon="🔑")
+pg_dash = st.Page("pages/Dashboard.py", title="Dashboard", icon="📊")
+pg_users = st.Page("pages/Usuarios.py", title="Gestão de Clientes", icon="👤")
 
-    # Barra lateral
-    st.sidebar.title(f"👤 {user['nome']}")
-    st.sidebar.caption(f"Perfil: {user['perfil'].upper()}")
-    st.sidebar.write("---")
+user = st.session_state.get("usuario_logado")
 
-    if st.sidebar.button("Sair (Logout)"):
-        st.session_state["usuario_logado"] = None
-        st.rerun()
-
-    # Cabeçalho com Título e Logo
-    col_titulo, col_logo = st.columns([3, 1])
-
-    with col_titulo:
-        st.title("📊 Portal de Business Intelligence")
-        st.write(f"Bem-vindo(a), **{user['nome']}**!")
-
-    with col_logo:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", width=200)
-        else:
-            st.markdown("### **Grupo Querino**", unsafe_allow_html=True)
-
-    st.write("---")
-
-    # URL do relatório publicado no Power BI Service
-    power_bi_url = "https://app.powerbi.com/reportEmbed?reportId=09875d00-042a-4a73-96e0-414ce0bb6cb6&autoAuth=true&ctid=eda0319f-5c00-44a9-8abf-250bf450fb16"
-
-    # Incorporação do Dashboard no Streamlit
-    st.components.v1.iframe(src=power_bi_url, height=800, scrolling=True)
-
-
-# 7. Execução do App
-if st.session_state["usuario_logado"] is None:
-    exibir_login()
+# Se não estiver logado OU se for o primeiro acesso (que exige troca de senha), mantém na tela de login
+if not user or user.get("primeiro_acesso") == 1:
+    pg = st.navigation([pg_login], position="hidden")
 else:
-    exibir_painel()
+    if user["perfil"] == "admin":
+        pg = st.navigation({"Painel Principal": [pg_dash, pg_users]})
+    else:
+        pg = st.navigation({"Painel Principal": [pg_dash]})
+
+pg.run()
