@@ -36,37 +36,40 @@ def buscar_kpis(engine, grupo_cliente=None, unidade=None, data_inicio=None, data
 
     query = text(
         f"""
-        WITH NotasTurmas AS (
+        WITH DadosTreinamento AS (
             SELECT 
                 processo, 
+                -- 1. Conta apenas os nomes distintos (reais) por turma
+                COUNT(DISTINCT NULLIF(TRIM(CAST(nome_do_participante AS TEXT)), '')) AS qtd_pessoas,
+                -- 2. Tira a média da nota final
                 AVG(CAST(NULLIF(REGEXP_REPLACE(REPLACE(CAST(aval_final AS TEXT), ',', '.'), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS media_turma
             FROM public.fato_treinamentos
             GROUP BY processo
         )
         SELECT 
-            -- 1. PAGO (Faturar + Cancelado Dia + Cancelado 24h + Status OK)
+            -- 1. PAGO 
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND UPPER(TRIM(fc.status_comercial)) = 'OK' 
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS total_faturado,
             
-            -- 2. FUTURO AGENDADO (Confirmado + Início > Hoje)
+            -- 2. FUTURO AGENDADO 
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) = 'CONFIRMADO' AND NULLIF(fc.inicio_1, '') IS NOT NULL AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS futuro_agendado,
             
-            -- 3. FUTURO LANÇADO (Branco/Nulo + Início > Hoje)
+            -- 3. FUTURO LANÇADO 
             SUM(CASE WHEN (fc.validacao IS NULL OR TRIM(fc.validacao) = '') AND NULLIF(fc.inicio_1, '') IS NOT NULL AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS futuro_lancado,
             
-            -- 4. PENDÊNCIA (Faturar + Cancelado Dia + Cancelado 24h + Status NÃO É OK)
+            -- 4. PENDÊNCIA 
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND (fc.status_comercial IS NULL OR UPPER(TRIM(fc.status_comercial)) != 'OK')
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS total_pendencia,
             
-            -- 5. TURMAS REALIZADAS (Cancelados Pagos + Confirmado + Faturar + Processo não vazio + Termino < Hoje)
+            -- 5. TURMAS REALIZADAS 
             COUNT(DISTINCT CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
                                  AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
                 THEN fc.processo END) AS turmas_realizadas,
             
-            -- 6. HORAS DE TREINAMENTO (Soma formacao, se vazio, usa reciclagem)
+            -- 6. HORAS DE TREINAMENTO 
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
                                  AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
@@ -75,17 +78,17 @@ def buscar_kpis(engine, grupo_cliente=None, unidade=None, data_inicio=None, data
                      CAST(NULLIF(REGEXP_REPLACE(CAST(fc.ch_reciclagem AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC), 
                      0) ELSE 0 END) AS horas_realizadas,
             
-            -- 7. PESSOAS TREINADAS (Aplicando a mesma regra base da liderança)
+            -- 7. PESSOAS TREINADAS (Agora soma a contagem REAL vinda da tabela de treinamentos)
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
                                  AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
-                THEN COALESCE(CAST(NULLIF(REGEXP_REPLACE(CAST(fc.pessoas AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC), 0) ELSE 0 END) AS pessoas_treinadas,
+                THEN COALESCE(dt.qtd_pessoas, 0) ELSE 0 END) AS pessoas_treinadas,
             
             -- 8. APROVEITAMENTO MÉDIO
             AVG(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
                                  AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
-                THEN nt.media_turma END) AS aproveitamento_medio,
+                THEN dt.media_turma END) AS aproveitamento_medio,
             
             -- 9. UNIDADES ATENDIDAS
             COUNT(DISTINCT CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
@@ -93,7 +96,7 @@ def buscar_kpis(engine, grupo_cliente=None, unidade=None, data_inicio=None, data
                                  AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
                 THEN fc.unidade END) AS unidades_atendidas
         FROM public.fato_comercial fc
-        LEFT JOIN NotasTurmas nt ON fc.processo = nt.processo
+        LEFT JOIN DadosTreinamento dt ON fc.processo = dt.processo
         {where_clause}
     """
     )
@@ -199,13 +202,15 @@ def buscar_proximas_turmas(engine, grupo_cliente=None, unidade=None, data_inicio
 def buscar_ranking_instrutores(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
+    
     where_clause += f"{complemento_where} {regra_operacional} AND fc.instrutor_1 IS NOT NULL AND fc.instrutor_1 != ''"
 
     query = text(
         f"""
-        WITH NotasTurmas AS (
+        WITH DadosTreinamento AS (
             SELECT 
                 processo, 
+                COUNT(DISTINCT NULLIF(TRIM(CAST(nome_do_participante AS TEXT)), '')) AS qtd_pessoas,
                 AVG(CAST(NULLIF(REGEXP_REPLACE(REPLACE(CAST(aval_final AS TEXT), ',', '.'), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS media_turma
             FROM public.fato_treinamentos
             GROUP BY processo
@@ -213,10 +218,15 @@ def buscar_ranking_instrutores(engine, grupo_cliente=None, unidade=None, data_in
         SELECT 
             fc.instrutor_1 AS instrutor,
             COUNT(DISTINCT fc.processo) AS turmas_realizadas,
-            SUM(COALESCE(CAST(NULLIF(REGEXP_REPLACE(CAST(fc.pessoas AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC), 0)) AS pessoas_treinadas,
-            AVG(nt.media_turma) AS nota_media
+            
+            -- Pessoas treinadas (Base REAL)
+            SUM(COALESCE(dt.qtd_pessoas, 0)) AS pessoas_treinadas,
+            
+            -- Média da turma
+            AVG(dt.media_turma) AS nota_media
+            
         FROM public.fato_comercial fc
-        LEFT JOIN NotasTurmas nt ON fc.processo = nt.processo
+        LEFT JOIN DadosTreinamento dt ON fc.processo = dt.processo
         {where_clause}
         GROUP BY fc.instrutor_1
         ORDER BY turmas_realizadas DESC
