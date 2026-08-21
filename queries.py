@@ -33,73 +33,81 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim):
 
 def buscar_kpis(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
+    complemento_where = " AND " if where_clause else " WHERE "
+    
+    # Garante que só puxe linhas que tenham data de início preenchida
+    where_clause += f"{complemento_where} fc.inicio_1 IS NOT NULL AND TRIM(fc.inicio_1) != ''"
 
-    query = text(
-        f"""
+    query = text(f"""
         WITH DadosTreinamento AS (
             SELECT 
                 processo, 
-                -- 1. Conta apenas os nomes distintos (reais) por turma
+                -- Conta apenas os nomes distintos (reais) por turma
                 COUNT(DISTINCT NULLIF(TRIM(CAST(nome_do_participante AS TEXT)), '')) AS qtd_pessoas,
-                -- 2. Tira a média da nota final
+                -- Tira a média da nota final
                 AVG(CAST(NULLIF(REGEXP_REPLACE(REPLACE(CAST(aval_final AS TEXT), ',', '.'), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS media_turma
             FROM public.fato_treinamentos
             GROUP BY processo
         )
         SELECT 
-            -- 1. PAGO 
-            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND UPPER(TRIM(fc.status_comercial)) = 'OK' 
+            -- 1. FATURAMENTO REALIZADO (Trava: status OK e data de início MENOR OU IGUAL a HOJE)
+            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') 
+                          AND UPPER(TRIM(fc.status_comercial)) = 'OK'
+                          AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS total_faturado,
             
-            -- 2. FUTURO AGENDADO 
-            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) = 'CONFIRMADO' AND NULLIF(fc.inicio_1, '') IS NOT NULL AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
+            -- 2. FUTURO AGENDADO (Trava: data estritamente MAIOR que HOJE)
+            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) = 'CONFIRMADO' 
+                          AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS futuro_agendado,
             
-            -- 3. FUTURO LANÇADO 
-            SUM(CASE WHEN (fc.validacao IS NULL OR TRIM(fc.validacao) = '') AND NULLIF(fc.inicio_1, '') IS NOT NULL AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
+            -- 3. FUTURO LANÇADO (Trava: data estritamente MAIOR que HOJE)
+            SUM(CASE WHEN (fc.validacao IS NULL OR TRIM(fc.validacao) = '') 
+                          AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS futuro_lancado,
             
-            -- 4. PENDÊNCIA 
-            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND (fc.status_comercial IS NULL OR UPPER(TRIM(fc.status_comercial)) != 'OK')
+            -- 4. PENDÊNCIA / GARGALO
+            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') 
+                          AND (fc.status_comercial IS NULL OR UPPER(TRIM(fc.status_comercial)) != 'OK')
                 THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS total_pendencia,
             
-            -- 5. TURMAS REALIZADAS 
+            -- 5. TURMAS REALIZADAS (Trava: data de término MENOR OU IGUAL a HOJE)
             COUNT(DISTINCT CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
-                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
+                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE 
                 THEN fc.processo END) AS turmas_realizadas,
             
-            -- 6. HORAS DE TREINAMENTO 
+            -- 6. HORAS DE TREINAMENTO (Trava: data de término MENOR OU IGUAL a HOJE)
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
-                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
+                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE 
                 THEN COALESCE(
                      CAST(NULLIF(REGEXP_REPLACE(CAST(fc.ch_formacao AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC),
                      CAST(NULLIF(REGEXP_REPLACE(CAST(fc.ch_reciclagem AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC), 
                      0) ELSE 0 END) AS horas_realizadas,
             
-            -- 7. PESSOAS TREINADAS (Agora soma a contagem REAL vinda da tabela de treinamentos)
+            -- 7. PESSOAS TREINADAS (Trava: data de término MENOR OU IGUAL a HOJE)
             SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
-                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
+                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE 
                 THEN COALESCE(dt.qtd_pessoas, 0) ELSE 0 END) AS pessoas_treinadas,
             
-            -- 8. APROVEITAMENTO MÉDIO
+            -- 8. APROVEITAMENTO MÉDIO (Trava: data de término MENOR OU IGUAL a HOJE)
             AVG(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
-                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
+                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE 
                 THEN dt.media_turma END) AS aproveitamento_medio,
             
-            -- 9. UNIDADES ATENDIDAS
+            -- 9. UNIDADES ATENDIDAS (Trava: data de término MENOR OU IGUAL a HOJE)
             COUNT(DISTINCT CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') 
                                  AND NULLIF(fc.processo, '') IS NOT NULL 
-                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') < CURRENT_DATE 
+                                 AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE 
                 THEN fc.unidade END) AS unidades_atendidas
+
         FROM public.fato_comercial fc
         LEFT JOIN DadosTreinamento dt ON fc.processo = dt.processo
         {where_clause}
-    """
-    )
+    """)
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
@@ -111,16 +119,18 @@ regra_operacional = " UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO 
 def buscar_grafico_nrs(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
-    where_clause += f"{complemento_where} {regra_operacional}"
+    where_clause += f"{complemento_where} fc.termino_1 IS NOT NULL AND TRIM(fc.termino_1) != '' AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE"
 
-    query = text(
-        f"""
-        SELECT fc.cod_treinamento, COUNT(fc.cod_treinamento) AS contagem
-        FROM public.fato_comercial fc 
+    query = text(f"""
+        SELECT 
+            COALESCE(NULLIF(TRIM(cod_treinamento), ''), 'OUTROS') AS nr,
+            COUNT(DISTINCT processo) AS quantidade
+        FROM public.fato_comercial fc
         {where_clause}
-        GROUP BY fc.cod_treinamento ORDER BY contagem DESC LIMIT 5
-    """
-    )
+        AND UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR')
+        GROUP BY nr
+        ORDER BY quantidade DESC
+    """)
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
@@ -128,24 +138,18 @@ def buscar_grafico_nrs(engine, grupo_cliente=None, unidade=None, data_inicio=Non
 def buscar_distribuicao_tipo(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
-    where_clause += f"{complemento_where} {regra_operacional}"
+    where_clause += f"{complemento_where} fc.termino_1 IS NOT NULL AND TRIM(fc.termino_1) != '' AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE"
 
-    query = text(
-        f"""
+    query = text(f"""
         SELECT 
-            CASE 
-                WHEN TRIM(CAST(fc.ch_formacao AS TEXT)) != '' AND (fc.ch_reciclagem IS NULL OR TRIM(CAST(fc.ch_reciclagem AS TEXT)) = '') THEN 'FORMAÇÃO'
-                WHEN TRIM(CAST(fc.ch_reciclagem AS TEXT)) != '' AND (fc.ch_formacao IS NULL OR TRIM(CAST(fc.ch_formacao AS TEXT)) = '') THEN 'RECICLAGEM'
-                WHEN TRIM(CAST(fc.ch_formacao AS TEXT)) != '' AND TRIM(CAST(fc.ch_reciclagem AS TEXT)) != '' THEN 'FORMAÇÃO + RECICLAGEM'
-                ELSE 'OUTROS'
-            END AS tipo,
-            COUNT(*) AS qtd
+            COALESCE(NULLIF(TRIM(modalidade), ''), 'NÃO INFORMADO') AS tipo,
+            COUNT(DISTINCT processo) AS quantidade
         FROM public.fato_comercial fc
         {where_clause}
-        GROUP BY 1
-        ORDER BY qtd DESC
-    """
-    )
+        AND UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR')
+        GROUP BY tipo
+        ORDER BY quantidade DESC
+    """)
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
@@ -153,24 +157,29 @@ def buscar_distribuicao_tipo(engine, grupo_cliente=None, unidade=None, data_inic
 def buscar_investimento_mensal(engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
-    
-    # Aplica exatamente a mesma regra operacional (apenas turmas já realizadas)
-    where_clause += f"{complemento_where} {regra_operacional}"
+    where_clause += f"{complemento_where} fc.inicio_1 IS NOT NULL AND TRIM(fc.inicio_1) != ''"
 
-    query = text(
-        f"""
+    query = text(f"""
         SELECT 
-            TO_CHAR(TO_DATE(fc.termino_1, 'DD/MM/YYYY'), 'MM/YYYY') AS mes_ano,
-            DATE_TRUNC('month', TO_DATE(fc.termino_1, 'DD/MM/YYYY')) AS mes_dt,
-            COUNT(DISTINCT fc.processo) AS turmas,
-            SUM(CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS investimento
+            TO_CHAR(TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY'), 'MM/YYYY') AS mes_ano,
+            TO_CHAR(TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY'), 'YYYY-MM') AS sort_date,
+            
+            -- Soma apenas o que já aconteceu (Data <= Hoje)
+            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') 
+                          AND UPPER(TRIM(fc.status_comercial)) = 'OK'
+                          AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE
+                THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS "Faturamento Realizado",
+                
+            -- Soma o que está para o futuro (Data > Hoje) para a linha de "Projetado"
+            SUM(CASE WHEN UPPER(TRIM(fc.validacao)) IN ('CONFIRMADO', '') 
+                          AND TO_DATE(NULLIF(fc.inicio_1, ''), 'DD/MM/YYYY') > CURRENT_DATE
+                THEN CAST(NULLIF(REGEXP_REPLACE(CAST(fc.valor AS TEXT), '[^0-9.]', '', 'g'), '') AS NUMERIC) ELSE 0 END) AS "Faturamento Projetado"
+                
         FROM public.fato_comercial fc
         {where_clause}
-        GROUP BY mes_ano, mes_dt
-        ORDER BY mes_dt ASC
-        LIMIT 12
-    """
-    )
+        GROUP BY 1, 2
+        ORDER BY 2
+    """)
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
@@ -205,14 +214,14 @@ def buscar_ranking_instrutores(engine, grupo_cliente=None, unidade=None, data_in
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim)
     complemento_where = " AND " if where_clause else " WHERE "
     
-    where_clause += f"{complemento_where} {regra_operacional} AND fc.instrutor_1 IS NOT NULL AND fc.instrutor_1 != ''"
+    # Aplica a trava de data direto no filtro base
+    where_clause += f"{complemento_where} fc.termino_1 IS NOT NULL AND TRIM(fc.termino_1) != '' AND TO_DATE(NULLIF(fc.termino_1, ''), 'DD/MM/YYYY') <= CURRENT_DATE"
 
-    query = text(
-        f"""
+    query = text(f"""
         WITH DadosTreinamento AS (
             SELECT 
                 processo, 
-                COUNT(DISTINCT NULLIF(TRIM(CAST(nome_do_participante AS TEXT)), '')) AS qtd_pessoas,
+                COUNT(DISTINCT NULLIF(TRIM(CAST(nome_do_participante AS TEXT)), '')) AS qtd_pessoas, -- Ajuste para 'nome' se você mudou no banco
                 AVG(CAST(NULLIF(REGEXP_REPLACE(REPLACE(CAST(aval_final AS TEXT), ',', '.'), '[^0-9.]', '', 'g'), '') AS NUMERIC)) AS media_turma
             FROM public.fato_treinamentos
             GROUP BY processo
@@ -220,20 +229,16 @@ def buscar_ranking_instrutores(engine, grupo_cliente=None, unidade=None, data_in
         SELECT 
             fc.instrutor_1 AS instrutor,
             COUNT(DISTINCT fc.processo) AS turmas_realizadas,
-            
-            -- Pessoas treinadas (Base REAL)
             SUM(COALESCE(dt.qtd_pessoas, 0)) AS pessoas_treinadas,
-            
-            -- Média da turma
             AVG(dt.media_turma) AS nota_media
-            
         FROM public.fato_comercial fc
         LEFT JOIN DadosTreinamento dt ON fc.processo = dt.processo
         {where_clause}
+          AND UPPER(TRIM(fc.validacao)) IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR')
+          AND fc.instrutor_1 IS NOT NULL AND TRIM(fc.instrutor_1) != ''
         GROUP BY fc.instrutor_1
         ORDER BY turmas_realizadas DESC
-    """
-    )
+    """)
     with engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 

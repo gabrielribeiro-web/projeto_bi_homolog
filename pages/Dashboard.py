@@ -163,7 +163,6 @@ with container_executiva:
 
     st.divider()
 
-    # O erro de indentação começava aqui. Agora está tudo alinhado dentro do 'with container_executiva:'
     st.markdown("#### ⚙️ Entregas e Qualidade (Realizado)")
     
     if user["perfil"] == "admin":
@@ -193,17 +192,21 @@ with container_executiva:
 
     g1, g2, g3 = st.columns([1.2, 1, 1.5])
     with g1:
+        # Pega apenas as 10 primeiras linhas (Top 10)
+        df_top10_nrs = df_nrs.head(10)
+        
         fig_nrs = px.bar(
-            df_nrs, x="contagem", y="cod_treinamento", orientation="h",
-            title="Volume de Turmas por Norma (Top 5)", text="contagem",
+            df_top10_nrs, x="quantidade", y="nr", orientation="h",
+            title="Volume de Turmas por Norma (Top 10)", text="quantidade",
             color_discrete_sequence=["#84cc16"]
         )
         fig_nrs.update_layout(yaxis={"categoryorder": "total ascending"}, hoverlabel=hover_style)
         st.plotly_chart(fig_nrs, use_container_width=True)
 
     with g2:
+        # CORREÇÃO: values mudou para "quantidade"
         fig_pie = px.pie(
-            df_tipo, values="qtd", names="tipo", hole=0.5,
+            df_tipo, values="quantidade", names="tipo", hole=0.5,
             title="Distribuição por Tipo",
             color_discrete_sequence=["#84cc16", "#38bdf8", "#a855f7"]
         )
@@ -211,16 +214,28 @@ with container_executiva:
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with g3:
+        # CORREÇÃO: Gráfico reajustado para faturamento realizado vs projetado
         fig_mes = go.Figure()
-        fig_mes.add_trace(go.Bar(x=df_mes["mes_ano"], y=df_mes["turmas"], name="Turmas", marker_color="#84cc16"))
-        fig_mes.add_trace(go.Scatter(x=df_mes["mes_ano"], y=df_mes["investimento"], name="Investimento (R$)", yaxis="y2", line=dict(color="#38bdf8", width=3)))
-        fig_mes.update_layout(
-            title="Turmas e Investimento por Mês",
-            yaxis=dict(title="Qtd Turmas"),
-            yaxis2=dict(title="Investimento (R$)", overlaying="y", side="right"),
-            legend=dict(x=0, y=1.1, orientation="h"),
-            hoverlabel=hover_style,
-        )
+        
+        if "Faturamento Realizado" in df_mes.columns:
+            fig_mes.add_trace(go.Bar(
+                x=df_mes["mes_ano"], 
+                y=df_mes["Faturamento Realizado"], 
+                name="Realizado (R$)", 
+                marker_color="#84cc16"
+            ))
+            fig_mes.add_trace(go.Scatter(
+                x=df_mes["mes_ano"], 
+                y=df_mes["Faturamento Projetado"], 
+                name="Projetado (R$)", 
+                line=dict(color="#38bdf8", width=3, dash="dot")
+            ))
+            fig_mes.update_layout(
+                title="Faturamento Mensal (Realizado vs Projetado)",
+                yaxis=dict(title="Faturamento (R$)"),
+                legend=dict(x=0, y=1.1, orientation="h"),
+                hoverlabel=hover_style,
+            )
         st.plotly_chart(fig_mes, use_container_width=True)
 
     st.divider()
@@ -254,7 +269,6 @@ with container_operacional:
         st.subheader("👥 Relação de Colaboradores Treinados")
         st.caption("Lista consolidada de todos os participantes que concluíram os treinamentos.")
 
-        # CORREÇÃO: Removido o locals(). O Python agora enxerga a variável global!
         if df_participantes.empty:
             st.info("Nenhum participante encontrado para os filtros selecionados.")
         else:
@@ -348,7 +362,7 @@ if container_financeira:
         if df_financeiro.empty:
             st.info("Nenhum dado financeiro encontrado para os filtros globais selecionados.")
         else:
-# --- 1. CRIANDO A BARRA DE FILTROS ESPECÍFICA DA ABA ---
+            # --- 1. CRIANDO A BARRA DE FILTROS ESPECÍFICA DA ABA ---
             st.markdown("##### 🔍 Filtros Financeiros")
             
             def extrair_mes_ano(dt):
@@ -365,7 +379,7 @@ if container_financeira:
                 status_selecionados = st.multiselect(
                     "Status Comercial (Vazio = Todos):",
                     options=status_opcoes,
-                    default=[] # <-- Vazio por padrão para não poluir a tela
+                    default=[] 
                 )
                 
             with cf2:
@@ -373,7 +387,7 @@ if container_financeira:
                 grupo_selecionados = st.multiselect(
                     "Grupo / Cliente (Vazio = Todos):",
                     options=grupo_opcoes,
-                    default=[] # <-- Vazio por padrão
+                    default=[] 
                 )
                 
             with cf3:
@@ -381,14 +395,12 @@ if container_financeira:
                 mes_selecionados = st.multiselect(
                     "Mês / Ano do Término (Vazio = Todos):",
                     options=mes_opcoes,
-                    default=[] # <-- Vazio por padrão
+                    default=[] 
                 )
 
-# --- 2. APLICANDO OS FILTROS AO DATAFRAME ---
-            # Começamos com a base completa
+            # --- 2. APLICANDO OS FILTROS AO DATAFRAME ---
             df_fin_filtrado = df_financeiro.copy()
             
-            # Só aplicamos o filtro se o usuário escolheu algo na caixinha
             if status_selecionados:
                 df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Status Comercial"].isin(status_selecionados)]
                 
