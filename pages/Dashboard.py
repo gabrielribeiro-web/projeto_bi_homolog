@@ -29,9 +29,9 @@ if not user:
 # Sidebar de perfil
 st.sidebar.markdown(
     f"""
-    <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #84cc16;">
-        <p style="margin: 0; font-weight: bold; color: #f8fafc;">👤 {user['nome']}</p>
-        <p style="margin: 0; font-size: 12px; color: #94a3b8;">Perfil: {user['perfil'].upper()}</p>
+    <div style="background-color: var(--secondary-background-color); padding: 12px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #84cc16;">
+        <p style="margin: 0; font-weight: bold; color: var(--text-color);">👤 {user['nome']}</p>
+        <p style="margin: 0; font-size: 12px; color: var(--text-color); opacity: 0.8;">Perfil: {user['perfil'].upper()}</p>
     </div>
 """,
     unsafe_allow_html=True,
@@ -69,7 +69,6 @@ with f1:
         grupo_sel = user.get("grupo")
         st.info(f"Grupo: **{grupo_sel}**")
 
-# FILTRO DE UNIDADE
 with f2:
     if grupo_sel and grupo_sel != "Todos":
         query_unidades = text(
@@ -93,47 +92,54 @@ with f3:
 with f4:
     dt_fim = st.date_input("Data Final:", value=date(2026, 12, 31))
 
-# Carregamento de dados com TODOS os filtros
-df_kpis = buscar_kpis(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
+# --- SELETOR DE MODO DE VISUALIZAÇÃO ---
+st.divider()
+st.subheader("🎯 Modo de Visualização (Escopo de Dados)")
+modo_visao = st.radio(
+    "Selecione qual fatia da operação e financeiro você deseja analisar:",
+    ["Consolidado (Geral)", "Presencial", "EAD"],
+    horizontal=True,
+    index=0
 )
-df_nrs = buscar_grafico_nrs(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_tipo = buscar_distribuicao_tipo(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_mes = buscar_investimento_mensal(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_proximas = buscar_proximas_turmas(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_instrutores = buscar_ranking_instrutores(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_financeiro = buscar_detalhamento_financeiro(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-df_participantes = buscar_lista_participantes(
-    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim
-)
-
 st.divider()
 
-# --- ESTRUTURA DE EXIBIÇÃO (ABAS PARA ADMIN, PÁGINA ÚNICA PARA CLIENTE) ---
+# Carregamento de dados com TODOS os filtros (Agora passando o MODO)
+df_kpis = buscar_kpis(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_nrs = buscar_grafico_nrs(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_tipo = buscar_distribuicao_tipo(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_mes = buscar_investimento_mensal(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_proximas = buscar_proximas_turmas(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_instrutores = buscar_ranking_instrutores(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_financeiro = buscar_detalhamento_financeiro(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+df_participantes = buscar_lista_participantes(
+    engine, grupo_cliente=grupo_sel, unidade=unidade_sel, data_inicio=dt_inicio, data_fim=dt_fim, modo_visao=modo_visao
+)
+
+# --- ESTRUTURA DE EXIBIÇÃO ---
 if user["perfil"] == "admin":
     tabs = st.tabs(["📊 Visão Geral", "🎓 Operação", "💰 Financeira"])
     container_executiva = tabs[0]
     container_operacional = tabs[1]
     container_financeira = tabs[2]
 else:
-    # Se for cliente, cria blocos em branco um embaixo do outro
     container_executiva = st.container()
     container_operacional = st.container()
-    container_financeira = None  # Cliente não vê posição financeira interna
+    container_financeira = None  
 
-# Estilo de Tooltips
 hover_style = dict(
     bgcolor="#ffffff",
     font_size=13,
@@ -147,14 +153,14 @@ hover_style = dict(
 with container_executiva:
     
     if user["perfil"] == "admin":
-        st.markdown("#### 💼 Financeiro")
+        st.markdown(f"#### 💼 Financeiro - {modo_visao}")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Faturamento Realizado", f"R$ {df_kpis['total_faturado'].iloc[0]:,.2f}")
         c2.metric("Futuro Agendado", f"R$ {df_kpis['futuro_agendado'].iloc[0]:,.2f}")
         c3.metric("Futuro Lançado", f"R$ {df_kpis['futuro_lancado'].iloc[0]:,.2f}")
         c4.metric("Pendências (Gargalo)", f"R$ {df_kpis['total_pendencia'].iloc[0]:,.2f}")
     else:
-        st.markdown("#### 💼 Investimento")
+        st.markdown(f"#### 💼 Investimento - {modo_visao}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Investimento Realizado (Turmas Concluídas)", f"R$ {df_kpis['total_faturado'].iloc[0]:,.2f}")
         investimento_futuro = df_kpis['futuro_agendado'].iloc[0] + df_kpis['futuro_lancado'].iloc[0]
@@ -163,7 +169,7 @@ with container_executiva:
 
     st.divider()
 
-    st.markdown("#### ⚙️ Entregas e Qualidade (Realizado)")
+    st.markdown(f"#### ⚙️ Entregas e Qualidade (Realizado) - {modo_visao}")
     
     if user["perfil"] == "admin":
         c5, c6, c7, c8, c9 = st.columns(5)
@@ -192,7 +198,6 @@ with container_executiva:
 
     g1, g2, g3 = st.columns([1.2, 1, 1.5])
     with g1:
-        # Pega apenas as 10 primeiras linhas (Top 10)
         df_top10_nrs = df_nrs.head(10)
         
         fig_nrs = px.bar(
@@ -200,21 +205,28 @@ with container_executiva:
             title="Volume de Turmas por Norma (Top 10)", text="quantidade",
             color_discrete_sequence=["#84cc16"]
         )
-        fig_nrs.update_layout(yaxis={"categoryorder": "total ascending"}, hoverlabel=hover_style)
+        fig_nrs.update_layout(
+            yaxis={"categoryorder": "total ascending"}, 
+            hoverlabel=hover_style,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
         st.plotly_chart(fig_nrs, use_container_width=True)
 
     with g2:
-        # CORREÇÃO: values mudou para "quantidade"
         fig_pie = px.pie(
             df_tipo, values="quantidade", names="tipo", hole=0.5,
             title="Distribuição por Tipo",
             color_discrete_sequence=["#84cc16", "#38bdf8", "#a855f7"]
         )
-        fig_pie.update_layout(hoverlabel=hover_style)
+        fig_pie.update_layout(
+            hoverlabel=hover_style,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with g3:
-        # CORREÇÃO: Gráfico reajustado para faturamento realizado vs projetado
         fig_mes = go.Figure()
         
         if "Faturamento Realizado" in df_mes.columns:
@@ -235,6 +247,8 @@ with container_executiva:
                 yaxis=dict(title="Faturamento (R$)"),
                 legend=dict(x=0, y=1.1, orientation="h"),
                 hoverlabel=hover_style,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
             )
         st.plotly_chart(fig_mes, use_container_width=True)
 
@@ -247,6 +261,7 @@ with container_executiva:
         hide_index=True,
         column_config={
             "inicio": "Data Início",
+            "modalidade": st.column_config.TextColumn("Modalidade", width="small"),
             "grupo": "Grupo / Cliente",
             "treinamento": "Treinamento / Norma",
             "unidade": "Unidade",
@@ -264,7 +279,6 @@ with container_operacional:
         st.divider()
         st.markdown("### 🎓 Qualidade Operacional")
 
-    # --- FUNÇÃO 1: DESENHA A LISTA DE ALUNOS ---
     def renderizar_alunos():
         st.subheader("👥 Relação de Colaboradores Treinados")
         st.caption("Lista consolidada de todos os participantes que concluíram os treinamentos.")
@@ -291,7 +305,6 @@ with container_operacional:
 
             df_exibir["CPF"] = df_exibir["CPF"].apply(aplicar_mascara_lgpd)
             
-            # Oculta a coluna Grupo se for cliente
             if user["perfil"] != "admin" and "Grupo" in df_exibir.columns:
                 df_exibir = df_exibir.drop(columns=["Grupo"])
                 
@@ -305,7 +318,6 @@ with container_operacional:
                 }
             )
 
-    # --- FUNÇÃO 2: DESENHA OS INSTRUTORES ---
     def renderizar_instrutores():
         st.subheader("👨‍🏫 Desempenho e Volume por Instrutor")
         st.caption("Acompanhe o volume de turmas realizadas e as notas médias de avaliação técnica.")
@@ -323,7 +335,11 @@ with container_operacional:
                     title="Top 10 Instrutores (Por Volume de Turmas)", text="turmas_realizadas",
                     color_discrete_sequence=["#38bdf8"]
                 )
-                fig_inst.update_layout(hoverlabel=hover_style)
+                fig_inst.update_layout(
+                    hoverlabel=hover_style,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)"
+                )
                 st.plotly_chart(fig_inst, use_container_width=True)
                 
             with o2:
@@ -341,15 +357,16 @@ with container_operacional:
                     height=350
                 )
 
-    # --- LÓGICA DE ORDEM CONDICIONAL ---
     if user["perfil"] == "admin":
-        renderizar_instrutores()
-        st.divider()
-        renderizar_alunos() # Alunos por baixo para o Admin
+        if modo_visao != "EAD":
+            renderizar_instrutores()
+            st.divider()
+        renderizar_alunos() 
     else:
-        renderizar_alunos() # Alunos por cima para o Cliente
-        st.divider()
-        renderizar_instrutores()
+        renderizar_alunos() 
+        if modo_visao != "EAD":
+            st.divider()
+            renderizar_instrutores()
 
 # ==========================================
 # BLOCO 3: POSIÇÃO FINANCEIRA
@@ -357,12 +374,11 @@ with container_operacional:
 if container_financeira:
     with container_financeira:
         st.subheader("💰 Gestão de Faturamento e Pendências")
-        st.caption("Acompanhe o detalhamento financeiro e utilize os filtros para focar nas cobranças.")
+        st.caption("Acompanhe o detalhamento financeiro com base na classificação de Saldo do Pedido.")
         
         if df_financeiro.empty:
             st.info("Nenhum dado financeiro encontrado para os filtros globais selecionados.")
         else:
-            # --- 1. CRIANDO A BARRA DE FILTROS ESPECÍFICA DA ABA ---
             st.markdown("##### 🔍 Filtros Financeiros")
             
             def extrair_mes_ano(dt):
@@ -375,9 +391,9 @@ if container_financeira:
             cf1, cf2, cf3 = st.columns(3)
             
             with cf1:
-                status_opcoes = sorted(df_financeiro["Status Comercial"].dropna().unique().tolist())
+                status_opcoes = sorted(df_financeiro["Classificação Financeira"].dropna().unique().tolist())
                 status_selecionados = st.multiselect(
-                    "Status Comercial (Vazio = Todos):",
+                    "Classificação Financeira (Vazio = Todos):",
                     options=status_opcoes,
                     default=[] 
                 )
@@ -398,11 +414,10 @@ if container_financeira:
                     default=[] 
                 )
 
-            # --- 2. APLICANDO OS FILTROS AO DATAFRAME ---
             df_fin_filtrado = df_financeiro.copy()
             
             if status_selecionados:
-                df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Status Comercial"].isin(status_selecionados)]
+                df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Classificação Financeira"].isin(status_selecionados)]
                 
             if grupo_selecionados:
                 df_fin_filtrado = df_fin_filtrado[df_fin_filtrado["Grupo"].isin(grupo_selecionados)]
@@ -412,33 +427,66 @@ if container_financeira:
             
             st.divider()
 
-            # --- 3. EXIBINDO GRÁFICOS E TABELA COM OS DADOS FILTRADOS ---
-            mascara_pendencia = (
-                df_fin_filtrado["Validação (Operação)"].isin(['FATURAR', 'CANCELADO DIA', 'CANCELADO 24H']) & 
-                (df_fin_filtrado["Status Comercial"] != 'OK')
+            # --- CORREÇÃO DA MÁSCARA DO GARGALO ---
+            # Converte a coluna Data Término para data real para podermos comparar com Hoje
+            data_termino_dt = pd.to_datetime(df_fin_filtrado["Data Término"], format='%d/%m/%Y', errors='coerce')
+            hoje = pd.Timestamp(date.today())
+
+            # 1. Gargalo de Faturamento (Financeiro ou Comercial travou a cobrança)
+            condicao_faturar_travado = (
+                df_fin_filtrado["Validação"].isin(['FATURAR', 'CANCELADO DIA', 'CANCELADO 24H']) & 
+                (
+                    (df_fin_filtrado["Status Comercial"] != 'OK') | 
+                    (df_fin_filtrado["Classificação Financeira"].isin(['ESTOURO DO SALDO', 'PENDÊNCIA CADASTRAL', 'AGUARDA LANÇAMENTOS']))
+                )
             )
+            
+            # 2. Gargalo Operacional (Turma já aconteceu mas não virou FATURAR)
+            condicao_operacao_atrasada = (
+                df_fin_filtrado["Validação"].isin(['CONFIRMADO', '', None]) & 
+                (data_termino_dt <= hoje)
+            )
+
+            # Combina as duas condições
+            mascara_pendencia = condicao_faturar_travado | condicao_operacao_atrasada
             df_pendencias = df_fin_filtrado[mascara_pendencia]
             
             f1, f2 = st.columns([1, 1.8])
             
             with f1:
-                st.markdown("##### Resumo")
+                st.markdown("##### Resumo do Faturamento")
                 if df_fin_filtrado.empty:
                     st.warning("Sem dados para este filtro.")
                 else:
-                    resumo_status = df_fin_filtrado.groupby("Status Comercial")["Valor (R$)"].sum().reset_index()
-                    resumo_status = resumo_status.sort_values(by="Valor (R$)", ascending=True)
+                    resumo_status = df_fin_filtrado.groupby("Classificação Financeira")["Valor Processo (R$)"].sum().reset_index()
+                    resumo_status = resumo_status.sort_values(by="Valor Processo (R$)", ascending=True)
+                    
+                    color_discrete_map = {
+                        "AGUARDA LANÇAMENTOS": "#3b82f6",     
+                        "SALDO DISPONÍVEL": "#84cc16",        
+                        "SALDO LIQUIDADO": "#166534",         
+                        "ESTOURO DO SALDO": "#ef4444",        
+                        "PENDÊNCIA CADASTRAL": "#eab308",     
+                        "SEM PEDIDO": "#94a3b8",              
+                        "ANOMALIA": "#64748b"                 
+                    }
                     
                     fig_status = px.bar(
                         resumo_status,
-                        y="Status Comercial",
-                        x="Valor (R$)",
+                        y="Classificação Financeira",
+                        x="Valor Processo (R$)",
                         orientation="h",
                         text_auto=".2s",
-                        color="Status Comercial",
-                        color_discrete_sequence=px.colors.qualitative.Pastel
+                        color="Classificação Financeira",
+                        color_discrete_map=color_discrete_map
                     )
-                    fig_status.update_layout(showlegend=False, xaxis_title="Valor (R$)", yaxis_title="")
+                    fig_status.update_layout(
+                        showlegend=False, 
+                        xaxis_title="Valor da Turma (R$)", 
+                        yaxis_title="",
+                        paper_bgcolor="rgba(0,0,0,0)", 
+                        plot_bgcolor="rgba(0,0,0,0)"
+                    )
                     st.plotly_chart(fig_status, use_container_width=True)
                 
             with f2:
@@ -447,13 +495,20 @@ if container_financeira:
                     st.success("Tudo certo! Nenhuma pendência de faturamento encontrada para os filtros aplicados.")
                 else:
                     st.dataframe(
-                        df_pendencias.drop(columns=["Mes_Ano"]),
+                        df_pendencias.drop(columns=["Mes_Ano", "Status Comercial", "Grupo"]),
                         use_container_width=True,
                         hide_index=True,
                         column_config={
                             "Processo": st.column_config.TextColumn("Processo", width="small"),
+                            "Pedido": st.column_config.TextColumn("Pedido", width="small"),
+                            "Modalidade": st.column_config.TextColumn("Modalidade", width="small"),
                             "Data Término": st.column_config.TextColumn("Término", width="small"),
-                            "Valor (R$)": st.column_config.NumberColumn("Valor", format="R$ %.2f")
+                            "Validação": st.column_config.TextColumn("Validação", width="small"),
+                            "Classificação Financeira": st.column_config.TextColumn("Motivo do Gargalo", width="medium"),
+                            "Valor Processo (R$)": st.column_config.NumberColumn("Valor Turma", format="R$ %.2f"),
+                            "Valor Pedido (R$)": st.column_config.NumberColumn("OC Total", format="R$ %.2f"),
+                            "Consumido (R$)": st.column_config.NumberColumn("Consumido", format="R$ %.2f"),
+                            "Saldo Final (R$)": st.column_config.NumberColumn("Saldo", format="R$ %.2f", help="Negativo = Estouro de limite")
                         },
                         height=350
                     )

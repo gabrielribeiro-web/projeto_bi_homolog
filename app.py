@@ -11,7 +11,8 @@ if "usuario_logado" not in st.session_state:
 
 
 def tela_login():
-    # --- CSS CUSTOMIZADO PARA A TELA DE LOGIN ---
+    # --- CSS CUSTOMIZADO EXCLUSIVO PARA A TELA DE LOGIN ---
+    # Este CSS só existe enquanto esta tela estiver aberta. Após o login, ele desaparece.
     st.markdown(
         """
         <style>
@@ -19,16 +20,21 @@ def tela_login():
         [data-testid="stSidebar"] {display: none;}
         [data-testid="stHeader"] {display: none;}
         
-        /* Adiciona um fundo moderno (Gradiente escuro elegante) */
-        /* Se quiser usar uma IMAGEM de fundo, apague a linha do background abaixo e use: 
-           background-image: url("URL_DA_SUA_IMAGEM_AQUI"); background-size: cover; */
+        /* Força o fundo escuro elegante APENAS nesta tela */
         .stApp {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
+        }
+        
+        /* Força as labels (E-mail, Senha, Abas) a ficarem brancas/cinzas claras.
+           Isso evita que o texto fique preto e suma caso o PC do usuário seja tema Claro. */
+        .stApp p, .stApp label, [data-baseweb="tab"] p, .stMarkdown p {
+            color: #f8fafc !important;
         }
         
         /* Ajuste estético para as abas (Tabs) do Login */
         .stTabs [data-baseweb="tab-list"] {
             justify-content: center;
+            background-color: transparent;
         }
         </style>
         """,
@@ -45,14 +51,14 @@ def tela_login():
         st.write("")
         st.write("")
 
-# --- LOGO DA EMPRESA ---
+        # --- LOGO DA EMPRESA ---
         col_espaco1, col_logo, col_espaco2 = st.columns([1, 2, 1])
         with col_logo:
             import os
             if os.path.exists("logo.png"):
-                st.image("logo.png", use_container_width=True) # <-- Corrigido!
+                st.image("logo.png", use_container_width=True)
             else:
-                st.markdown("<h2 style='text-align: center;'>📊 Portal Dashboard.</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align: center; color: #f8fafc;'>📊 Portal Dashboard.</h2>", unsafe_allow_html=True)
         
         st.write("") # Espaço entre a logo e a caixa de login
 

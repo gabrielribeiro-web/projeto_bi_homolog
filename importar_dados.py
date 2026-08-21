@@ -55,6 +55,7 @@ def baixar_dataframe_limpo(url_csv):
     leitor = list(csv.reader(io.StringIO(response.text)))
 
     linha_cabecalho = None
+    # Adicionadas palavras-chave referentes à aba Ref.Pedidos (fato_valores)
     palavras_chave = [
         "STATUS COMERCIAL",
         "STATUS FOLLOW-UP",
@@ -65,6 +66,10 @@ def baixar_dataframe_limpo(url_csv):
         "CLIENTE",
         "NOME",
         "CPF",
+        "PEDIDO",           # <- Para a aba Ref.Pedidos
+        "STATUS PEDIDO",    # <- Para a aba Ref.Pedidos
+        "EAD",              # <- Para a aba Ref.Pedidos
+        "PRESENCIAL",       # <- Para a aba Ref.Pedidos
     ]
 
     for idx, linha in enumerate(leitor):
@@ -147,10 +152,11 @@ def recriar_views(engine):
 
 if __name__ == "__main__":
     planilhas = {
-        "dim_instrutores": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=2064220220",
-        "fato_comercial": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=1723286423",
-        "fato_treinamentos": "https://docs.google.com/spreadsheets/d/1IEJVUpt8Z-Bxov6KDfqJ9BRbxZ8-NJ-LHs-D06mhWE4/export?format=csv&gid=392845010", # <-- GID CORRETO AGORA!
-    }
+    "dim_instrutores": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=2064220220",
+    "fato_comercial": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=1723286423",
+    "fato_treinamentos": "https://docs.google.com/spreadsheets/d/1IEJVUpt8Z-Bxov6KDfqJ9BRbxZ8-NJ-LHs-D06mhWE4/export?format=csv&gid=392845010",
+    "fato_valores": "https://docs.google.com/spreadsheets/d/1UvXfXwjXOO0dd0dzvHJB49YrInGGlh0LugFhVvOFkJI/export?format=csv&gid=137403279",
+}
 
     # PASSO A: Deletar as views temporariamente para o banco não dar erro de dependência
     print("Preparando o banco (removendo views antigas)...")
@@ -158,7 +164,7 @@ if __name__ == "__main__":
         conn.execute(text("DROP VIEW IF EXISTS public.dim_clientes CASCADE;"))
         conn.execute(text("DROP VIEW IF EXISTS public.v_fato_comercial_clean CASCADE;"))
 
-    # PASSO B: Carregar as 3 planilhas atualizadas
+    # PASSO B: Carregar as planilhas atualizadas
     for tabela, url in planilhas.items():
         try:
             processar_e_carregar(url, tabela)
