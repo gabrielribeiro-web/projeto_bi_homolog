@@ -37,7 +37,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
+if st.sidebar.button("  Sair (Logout)", use_container_width=True):
     st.session_state["usuario_logado"] = None
     st.rerun()
 
@@ -47,7 +47,7 @@ engine = get_engine()
 col_tit, col_logo = st.columns([3, 1])
 with col_tit:
     st.title("📊 Portal de Dashboard")
-    st.caption("Visão Consolidada de Treinamentos e Indicadores Financeiros")
+    st.caption("Visão de Treinamentos e Indicadores Financeiros")
 with col_logo:
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
@@ -94,10 +94,10 @@ with f4:
 
 # --- SELETOR DE MODO DE VISUALIZAÇÃO ---
 st.divider()
-st.subheader("🎯 Modo de Visualização (Escopo de Dados)")
+st.subheader("🎯 Tipo de Modalidade")
 modo_visao = st.radio(
-    "Selecione qual fatia da operação e financeiro você deseja analisar:",
-    ["Consolidado (Geral)", "Presencial", "EAD"],
+    "Selecione a modalidade que deseja analisar:",
+    ["Geral", "Presencial", "EAD"],
     horizontal=True,
     index=0
 )

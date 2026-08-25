@@ -15,13 +15,14 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append("fc.unidade = :unidade")
         params["unidade"] = unidade
 
+    # 🎯 CORREÇÃO: Utiliza sempre a Data de Término (Conclusão) para filtrar os relatórios
+    campo_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+
     if data_inicio:
-        campo_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_inicio_1"
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} >= TO_DATE(:data_inicio, 'YYYY-MM-DD')")
         params["data_inicio"] = data_inicio.strftime("%Y-%m-%d")
 
     if data_fim:
-        campo_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_inicio_1"
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} <= TO_DATE(:data_fim, 'YYYY-MM-DD')")
         params["data_fim"] = data_fim.strftime("%Y-%m-%d")
 
@@ -163,9 +164,27 @@ def buscar_investimento_mensal(_engine, grupo_cliente=None, unidade=None, data_i
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_proximas_turmas(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
-    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    complemento_where = " AND " if where_clause else " WHERE "
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    # 🎯 CORREÇÃO: Aplica filtros sem travar as próximas turmas pela data de término do filtro do topo
+    condicoes = []
+    params = {}
+
+    if grupo_cliente and grupo_cliente != "Todos":
+        condicoes.append("fc.grupo = :grupo")
+        params["grupo"] = grupo_cliente
+
+    if unidade and unidade != "Todas":
+        condicoes.append("fc.unidade = :unidade")
+        params["unidade"] = unidade
+
+    if modo_visao == "Presencial":
+        condicoes.append("fc.modalidade LIKE '%PRESENCIAL%'")
+    elif modo_visao == "EAD":
+        condicoes.append("(fc.modalidade LIKE '%EAD%' OR fc.modalidade LIKE '%ON-LINE%')")
+
+    where_clause_local = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
+    complemento_where = " AND " if where_clause_local else " WHERE "
+    
+    col_data_inicio = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_inicio_1"
 
     query = text(f"""
         SELECT 
@@ -174,8 +193,8 @@ def buscar_proximas_turmas(_engine, grupo_cliente=None, unidade=None, data_inici
             CASE WHEN '{modo_visao}' = 'EAD' THEN 'Plataforma EAD' ELSE fc.instrutor END AS instrutor,
             fc.valor_turma AS valor
         FROM public.mv_fato_comercial_tratada fc
-        {where_clause} {complemento_where} fc.validacao = 'CONFIRMADO' AND {col_data} > CURRENT_DATE
-        ORDER BY {col_data} ASC LIMIT 20
+        {where_clause_local} {complemento_where} fc.validacao = 'CONFIRMADO' AND {col_data_inicio} > CURRENT_DATE
+        ORDER BY {col_data_inicio} ASC LIMIT 20
     """)
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
