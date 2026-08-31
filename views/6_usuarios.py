@@ -2,41 +2,19 @@ import bcrypt
 import pandas as pd
 import streamlit as st
 from auth import registrar_log
-from database import get_engine
 from sqlalchemy import text
+from components import renderizar_filtros
 
-st.set_page_config(
-    page_title="Gestão de Clientes - Grupo Querino",
-    page_icon="👤",
-    layout="wide",
-)
+# 1. Carrega o cabeçalho padrão, menu lateral e pega os dados da sessão
+engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros()
 
-user = st.session_state.get("usuario_logado")
+# 2. Trava de Segurança extra (O app.py já bloqueia, mas garantimos aqui também)
 if not user or user["perfil"] != "admin":
     st.error("Acesso restrito a Administradores.")
     st.stop()
 
-engine = get_engine()
-
-# Componente de Perfil na Barra Lateral
-st.sidebar.markdown(
-    f"""
-    <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #84cc16;">
-        <p style="margin: 0; font-weight: bold; color: #f8fafc;">👤 {user['nome']}</p>
-        <p style="margin: 0; font-size: 12px; color: #94a3b8;">Perfil: {user['perfil'].upper()}</p>
-    </div>
-""",
-    unsafe_allow_html=True,
-)
-
-if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
-    st.session_state["usuario_logado"] = None
-    st.rerun()
-
-st.title("👤 Gestão e Cadastro de Clientes")
-st.caption(
-    "Cadastre novos acessos para clientes ou equipe interna, edite informações ou gerencie permissões."
-)
+st.title("👤 Gestão e Cadastro de Acessos")
+st.caption("Cadastre novos acessos para clientes ou equipe interna, edite informações ou gerencie permissões.")
 
 tab_cadastro, tab_edicao = st.tabs(
     ["➕ Novo Cliente / Acesso", "✏️ Gerenciar / Editar Clientes"]
@@ -63,9 +41,7 @@ with tab_cadastro:
         with st.form("form_novo_cliente", clear_on_submit=False):
             nome = st.text_input("Nome do Cliente / Empresa")
             email = st.text_input("E-mail de Acesso")
-            senha_prov = st.text_input(
-                "Senha Inicial Provisória", type="password"
-            )
+            senha_prov = st.text_input("Senha Inicial Provisória", type="password")
 
             # Mapeamento do perfil para facilitar o entendimento do comercial
             perfil_rotulo = st.selectbox(
@@ -75,21 +51,15 @@ with tab_cadastro:
                     "Administrador Interno (Acesso Total)",
                 ],
             )
-            perfil = (
-                "usuario"
-                if perfil_rotulo.startswith("Cliente")
-                else "admin"
-            )
+            perfil = "usuario" if perfil_rotulo.startswith("Cliente") else "admin"
 
-            grupo_sel = (
+            grupo_sel_form = (
                 st.selectbox("Vincular ao Grupo/Cliente", lista_grupos)
                 if perfil == "usuario"
                 else None
             )
 
-            btn_cadastrar = st.form_submit_button(
-                "Cadastrar Cliente", use_container_width=True
-            )
+            btn_cadastrar = st.form_submit_button("Cadastrar Cliente", use_container_width=True)
 
             if btn_cadastrar:
                 email_clean = email.strip().lower()
@@ -98,49 +68,36 @@ with tab_cadastro:
                     st.warning("Preencha todos os campos obrigatórios.")
                 else:
                     # Checa duplicação de e-mail
-                    query_checa_email = text(
-                        "SELECT COUNT(*) FROM public.tb_usuarios WHERE LOWER(email) = :email"
-                    )
+                    query_checa_email = text("SELECT COUNT(*) FROM public.tb_usuarios WHERE LOWER(email) = :email")
                     with engine.connect() as conn:
-                        qtd_existente = conn.execute(
-                            query_checa_email, {"email": email_clean}
-                        ).scalar()
+                        qtd_existente = conn.execute(query_checa_email, {"email": email_clean}).scalar()
 
                     if qtd_existente > 0:
-                        st.error(
-                            f"⚠️ O e-mail **{email_clean}** já possui um cadastro ativo no sistema!"
-                        )
+                        st.error(f"⚠️ O e-mail **{email_clean}** já possui um cadastro ativo no sistema!")
                     else:
                         salt = bcrypt.gensalt(12)
-                        senha_hash = bcrypt.hashpw(
-                            senha_prov.encode("utf-8"), salt
-                        ).decode("utf-8")
+                        senha_hash = bcrypt.hashpw(senha_prov.encode("utf-8"), salt).decode("utf-8")
 
-                        query_insert = text(
-                            """
+                        query_insert = text("""
                             INSERT INTO public.tb_usuarios (nome, email, senha_hash, perfil, ativo, grupo, primeiro_acesso)
                             VALUES (:nome, :email, :senha_hash, :perfil, 1, :grupo, 1)
-                        """
-                        )
+                        """)
                         try:
                             with engine.begin() as conn:
-                                conn.execute(
-                                    query_insert,
-                                    {
-                                        "nome": nome,
-                                        "email": email_clean,
-                                        "senha_hash": senha_hash,
-                                        "perfil": perfil,
-                                        "grupo": grupo_sel,
-                                    },
-                                )
+                                conn.execute(query_insert, {
+                                    "nome": nome,
+                                    "email": email_clean,
+                                    "senha_hash": senha_hash,
+                                    "perfil": perfil,
+                                    "grupo": grupo_sel_form,
+                                })
 
                             registrar_log(
                                 engine,
                                 acao="CRIACAO_CLIENTE",
                                 usuario_email=user["email"],
                                 usuario_id=str(user["id"]),
-                                detalhes=f"Cadastrou o cliente '{nome}' ({email_clean}) no grupo '{grupo_sel}'",
+                                detalhes=f"Cadastrou o cliente '{nome}' ({email_clean}) no grupo '{grupo_sel_form}'",
                             )
 
                             st.session_state["ultimo_cadastro"] = {
@@ -148,9 +105,7 @@ with tab_cadastro:
                                 "email": email_clean,
                                 "senha": senha_prov,
                             }
-                            st.success(
-                                f"Cliente **{nome}** cadastrado com sucesso!"
-                            )
+                            st.success(f"Cliente **{nome}** cadastrado com sucesso!")
                         except Exception as e:
                             st.error(f"Erro ao cadastrar cliente: {e}")
 
@@ -168,7 +123,6 @@ Seu acesso ao Portal de Dashboard do Grupo Querino foi liberado.
 
 ⚠️ No primeiro acesso, o sistema solicitará obrigatoriamente a criação da sua nova senha."""
 
-            # Campo editável
             texto_editado = st.text_area(
                 "Texto da Mensagem (Editável):",
                 value=mensagem_padrao,
@@ -178,14 +132,10 @@ Seu acesso ao Portal de Dashboard do Grupo Querino foi liberado.
 
             st.write("**Bloco de Cópia Rápida:**")
             st.code(texto_editado, language="text")
-
-            st.caption(
-                "💡 **Dica:** Passe o mouse no bloco cinza acima e clique no ícone de cópia 📋 no canto superior direito para enviar ao cliente."
-            )
+            st.caption("💡 **Dica:** Passe o mouse no bloco cinza acima e clique no ícone de cópia 📋 no canto superior direito para enviar ao cliente.")
         else:
-            st.info(
-                "Preencha o formulário ao lado para gerar os dados de envio do cliente."
-            )
+            st.info("Preencha o formulário ao lado para gerar os dados de envio do cliente.")
+
 
 # ==========================================
 # ABA 2: EDITAR, BLOQUEAR E EXCLUIR CLIENTES
@@ -225,11 +175,7 @@ with tab_edicao:
                 st.selectbox(
                     "Grupo Vinculado",
                     lista_grupos,
-                    index=(
-                        lista_grupos.index(usr_dados["grupo"])
-                        if usr_dados["grupo"] in lista_grupos
-                        else 0
-                    ),
+                    index=(lista_grupos.index(usr_dados["grupo"]) if usr_dados["grupo"] in lista_grupos else 0),
                 )
                 if novo_perfil == "usuario"
                 else None
@@ -242,22 +188,16 @@ with tab_edicao:
                 help="Desative para bloquear o acesso deste cliente imediatamente.",
             )
             st.divider()
-            resetar_senha = st.checkbox(
-                "Resetar Senha (Forçar Primeiro Acesso)"
-            )
+            resetar_senha = st.checkbox("Resetar Senha (Forçar Primeiro Acesso)")
             nova_senha_prov = (
-                st.text_input("Nova Senha Provisória", type="password")
-                if resetar_senha
-                else None
+                st.text_input("Nova Senha Provisória", type="password") if resetar_senha else None
             )
 
         # Salvar Edições
         if st.button("💾 Salvar Alterações", use_container_width=True):
             email_edit_clean = novo_email.strip().lower()
 
-            query_checa_email_outros = text(
-                "SELECT COUNT(*) FROM public.tb_usuarios WHERE LOWER(email) = :email AND id != CAST(:id AS UUID)"
-            )
+            query_checa_email_outros = text("SELECT COUNT(*) FROM public.tb_usuarios WHERE LOWER(email) = :email AND id != CAST(:id AS UUID)")
             with engine.connect() as conn:
                 qtd_outros = conn.execute(
                     query_checa_email_outros,
@@ -265,17 +205,11 @@ with tab_edicao:
                 ).scalar()
 
             if qtd_outros > 0:
-                st.error(
-                    f"⚠️ O e-mail **{email_edit_clean}** já pertence a outro cadastro."
-                )
+                st.error(f"⚠️ O e-mail **{email_edit_clean}** já pertence a outro cadastro.")
             else:
                 query_update = """
                     UPDATE public.tb_usuarios 
-                    SET nome = :nome, 
-                        email = :email, 
-                        perfil = :perfil, 
-                        grupo = :grupo, 
-                        ativo = :ativo
+                    SET nome = :nome, email = :email, perfil = :perfil, grupo = :grupo, ativo = :ativo
                 """
                 params = {
                     "nome": novo_nome,
@@ -288,12 +222,8 @@ with tab_edicao:
 
                 if resetar_senha and nova_senha_prov:
                     salt = bcrypt.gensalt(12)
-                    params["senha_hash"] = bcrypt.hashpw(
-                        nova_senha_prov.encode("utf-8"), salt
-                    ).decode("utf-8")
-                    query_update += (
-                        ", senha_hash = :senha_hash, primeiro_acesso = 1"
-                    )
+                    params["senha_hash"] = bcrypt.hashpw(nova_senha_prov.encode("utf-8"), salt).decode("utf-8")
+                    query_update += ", senha_hash = :senha_hash, primeiro_acesso = 1"
 
                 query_update += " WHERE id = CAST(:id AS UUID)"
 
@@ -318,27 +248,14 @@ with tab_edicao:
 
         # Exclusão Definitiva
         with st.expander("🚨 Zona de Perigo: Excluir Cliente"):
-            st.warning(
-                "A exclusão é permanente. O cliente perderá o acesso ao portal imediatamente."
-            )
-            confirma_exclusao = st.checkbox(
-                f"Confirmo que desejo excluir permanentemente o cadastro de **{usr_dados['nome']}**."
-            )
+            st.warning("A exclusão é permanente. O cliente perderá o acesso ao portal imediatamente.")
+            confirma_exclusao = st.checkbox(f"Confirmo que desejo excluir permanentemente o cadastro de **{usr_dados['nome']}**.")
 
-            if st.button(
-                "🗑️ Excluir Cliente Definitivamente",
-                type="primary",
-                disabled=not confirma_exclusao,
-                use_container_width=True,
-            ):
-                query_delete = text(
-                    "DELETE FROM public.tb_usuarios WHERE id = CAST(:id AS UUID)"
-                )
+            if st.button("🗑️ Excluir Cliente Definitivamente", type="primary", disabled=not confirma_exclusao, use_container_width=True):
+                query_delete = text("DELETE FROM public.tb_usuarios WHERE id = CAST(:id AS UUID)")
                 try:
                     with engine.begin() as conn:
-                        conn.execute(
-                            query_delete, {"id": str(usr_dados["id"])}
-                        )
+                        conn.execute(query_delete, {"id": str(usr_dados["id"])})
 
                     registrar_log(
                         engine,

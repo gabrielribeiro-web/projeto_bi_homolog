@@ -3,35 +3,25 @@ from auth import alterar_senha_primeiro_acesso, autenticar_usuario, registrar_lo
 from database import get_engine
 
 st.set_page_config(
-    page_title="Portal Dashboard. - Grupo Querino", page_icon="📊", layout="wide"
+    page_title="Portal Dashboard - Grupo Querino", page_icon="📊", layout="wide"
 )
 
 if "usuario_logado" not in st.session_state:
     st.session_state["usuario_logado"] = None
 
-
 def tela_login():
     # --- CSS CUSTOMIZADO EXCLUSIVO PARA A TELA DE LOGIN ---
-    # Este CSS só existe enquanto esta tela estiver aberta. Após o login, ele desaparece.
     st.markdown(
         """
         <style>
-        /* Oculta a barra lateral e o cabeçalho padrão do Streamlit */
         [data-testid="stSidebar"] {display: none;}
         [data-testid="stHeader"] {display: none;}
-        
-        /* Força o fundo escuro elegante APENAS nesta tela */
         .stApp {
             background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
         }
-        
-        /* Força as labels (E-mail, Senha, Abas) a ficarem brancas/cinzas claras.
-           Isso evita que o texto fique preto e suma caso o PC do usuário seja tema Claro. */
         .stApp p, .stApp label, [data-baseweb="tab"] p, .stMarkdown p {
             color: #f8fafc !important;
         }
-        
-        /* Ajuste estético para as abas (Tabs) do Login */
         .stTabs [data-baseweb="tab-list"] {
             justify-content: center;
             background-color: transparent;
@@ -41,11 +31,9 @@ def tela_login():
         unsafe_allow_html=True,
     )
 
-    # Cria colunas para centralizar a caixa de login no meio da tela
     col1, col2, col3 = st.columns([1, 1.2, 1])
 
     with col2:
-        # Espaçamento no topo para não ficar colado
         st.write("")
         st.write("")
         st.write("")
@@ -60,7 +48,7 @@ def tela_login():
             else:
                 st.markdown("<h2 style='text-align: center; color: #f8fafc;'>📊 Portal Dashboard.</h2>", unsafe_allow_html=True)
         
-        st.write("") # Espaço entre a logo e a caixa de login
+        st.write("")
 
         # CASO 1: Usuário logado precisando alterar a senha no PRIMEIRO ACESSO
         user = st.session_state.get("usuario_logado")
@@ -133,7 +121,6 @@ def tela_login():
                     
                     st.info("**Próximo passo:** Clique abaixo para notificar nossa equipe de suporte.")
                     
-                    # --- CONFIGURAÇÃO WHATSAPP ---
                     numero_whatsapp = "5519999999999" # Mude para o número real
                     msg_zap = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera} (Grupo: {grupo_recupera})"
                     link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={msg_zap.replace(' ', '%20')}"
@@ -142,21 +129,38 @@ def tela_login():
                 else:
                     st.warning("Informe seu E-mail e o nome do Grupo/Empresa.")
 
-
-# --- Configuração das Páginas e Navegação ---
-pg_login = st.Page(tela_login, title="Login", icon="🔑")
-pg_dash = st.Page("pages/Dashboard.py", title="Dashboard", icon="📊")
-pg_users = st.Page("pages/Usuarios.py", title="Gestão de Clientes", icon="👤")
+# ==========================================
+# GESTÃO DE ROTEAMENTO (NAVEGAÇÃO SEGURA)
+# ==========================================
 
 user = st.session_state.get("usuario_logado")
 
-# Se não estiver logado OU se for o primeiro acesso (que exige troca de senha), mantém na tela de login
+# Se não estiver logado OU precisar trocar a senha provisória, trava na tela de Login
 if not user or user.get("primeiro_acesso") == 1:
+    pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
+
 else:
+    # 1. Telas PÚBLICAS (Acesso para Admin e Clientes)
+    visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
+    qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
+    operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️")  # <-- Alterado para Operação
+    
+    paginas_cliente = [visao_geral, qualidade, operacao]
+
+    # 2. Telas PRIVADAS (Apenas Admin enxerga isso)
     if user["perfil"] == "admin":
-        pg = st.navigation({"Painel Principal": [pg_dash, pg_users]})
+        comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
+        financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
+        usuarios = st.Page("views/6_usuarios.py", title="Usuários e Acessos", icon="👥")
+        
+        pg = st.navigation({
+            "📊 Análises e Operação": paginas_cliente,
+            "💼 Gestão Interna (Admin)": [comercial, financeiro],
+            "🛠️ Configurações do Sistema": [usuarios]
+        })
     else:
-        pg = st.navigation({"Painel Principal": [pg_dash]})
+        # Se for o cliente, monta o menu só com as telas públicas
+        pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
 
 pg.run()

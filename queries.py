@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 import streamlit as st
 
-def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao="Consolidado (Geral)"):
+def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao="Presencial"):
     condicoes = []
     params = {}
 
@@ -15,8 +15,7 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append("fc.unidade = :unidade")
         params["unidade"] = unidade
 
-    # 🎯 CORREÇÃO: Utiliza sempre a Data de Término (Conclusão) para filtrar os relatórios
-    campo_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    campo_data = "fc.dt_termino_presencial"
 
     if data_inicio:
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} >= TO_DATE(:data_inicio, 'YYYY-MM-DD')")
@@ -26,19 +25,17 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} <= TO_DATE(:data_fim, 'YYYY-MM-DD')")
         params["data_fim"] = data_fim.strftime("%Y-%m-%d")
 
-    if modo_visao == "Presencial":
-        condicoes.append("fc.modalidade LIKE '%PRESENCIAL%'")
-    elif modo_visao == "EAD":
-        condicoes.append("(fc.modalidade LIKE '%EAD%' OR fc.modalidade LIKE '%ON-LINE%')")
+    # Isolamento de segurança: Foca em registros com componente Presencial até a chegada do EAD
+    condicoes.append("fc.modalidade LIKE '%PRESENCIAL%'")
 
     where_clause = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
     return where_clause, params
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         WITH BaseTreinamentos AS (
@@ -77,8 +74,12 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
             COALESCE(SUM(CASE WHEN (bt.validacao IS NULL OR bt.validacao = '') AND bt.dt_termino > CURRENT_DATE
                         THEN bt.valor_turma ELSE 0 END), 0) AS futuro_lancado,
             
+            -- BLINDAGEM: Exclui cancelados/reagendados do cálculo do gargalo financeiro
             COALESCE(SUM(CASE 
-                        WHEN bt.dt_termino <= CURRENT_DATE AND (
+                        WHEN bt.dt_termino <= CURRENT_DATE 
+                          AND UPPER(COALESCE(bt.validacao, '')) NOT IN ('CANCELADO', 'REAGENDADO')
+                          AND UPPER(COALESCE(bt.status_comercial, '')) NOT IN ('CANCELADO', 'REAGENDADO')
+                          AND (
                              bt.validacao NOT IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') OR 
                              UPPER(bt.status_comercial) LIKE '%PEDIDO%' OR 
                              (bt.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND bt.status_comercial = 'OK' 
@@ -99,10 +100,10 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_grafico_nrs(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_grafico_nrs(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     complemento_where = " AND " if where_clause else " WHERE "
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         SELECT 
@@ -118,10 +119,10 @@ def buscar_grafico_nrs(_engine, grupo_cliente=None, unidade=None, data_inicio=No
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_distribuicao_tipo(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_distribuicao_tipo(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     complemento_where = " AND " if where_clause else " WHERE "
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         SELECT 
@@ -137,9 +138,9 @@ def buscar_distribuicao_tipo(_engine, grupo_cliente=None, unidade=None, data_ini
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_investimento_mensal(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_investimento_mensal(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         SELECT 
@@ -163,37 +164,19 @@ def buscar_investimento_mensal(_engine, grupo_cliente=None, unidade=None, data_i
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_proximas_turmas(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
-    # 🎯 CORREÇÃO: Aplica filtros sem travar as próximas turmas pela data de término do filtro do topo
-    condicoes = []
-    params = {}
-
-    if grupo_cliente and grupo_cliente != "Todos":
-        condicoes.append("fc.grupo = :grupo")
-        params["grupo"] = grupo_cliente
-
-    if unidade and unidade != "Todas":
-        condicoes.append("fc.unidade = :unidade")
-        params["unidade"] = unidade
-
-    if modo_visao == "Presencial":
-        condicoes.append("fc.modalidade LIKE '%PRESENCIAL%'")
-    elif modo_visao == "EAD":
-        condicoes.append("(fc.modalidade LIKE '%EAD%' OR fc.modalidade LIKE '%ON-LINE%')")
-
-    where_clause_local = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
-    complemento_where = " AND " if where_clause_local else " WHERE "
-    
-    col_data_inicio = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_inicio_1"
+def buscar_proximas_turmas(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    complemento_where = " AND " if where_clause else " WHERE "
+    col_data_inicio = "fc.dt_inicio_presencial"
 
     query = text(f"""
         SELECT 
-            CASE WHEN '{modo_visao}' = 'EAD' THEN fc.termino_ead_str ELSE fc.inicio_str END AS inicio,
+            fc.inicio_1 AS inicio,
             fc.modalidade, fc.grupo, fc.cod_treinamento AS treinamento, fc.unidade,
-            CASE WHEN '{modo_visao}' = 'EAD' THEN 'Plataforma EAD' ELSE fc.instrutor END AS instrutor,
+            fc.instrutor_1 AS instrutor,
             fc.valor_turma AS valor
         FROM public.mv_fato_comercial_tratada fc
-        {where_clause_local} {complemento_where} fc.validacao = 'CONFIRMADO' AND {col_data_inicio} > CURRENT_DATE
+        {where_clause} {complemento_where} fc.validacao = 'CONFIRMADO' AND {col_data_inicio} > CURRENT_DATE
         ORDER BY {col_data_inicio} ASC LIMIT 20
     """)
     with _engine.connect() as conn:
@@ -201,10 +184,10 @@ def buscar_proximas_turmas(_engine, grupo_cliente=None, unidade=None, data_inici
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_ranking_instrutores(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_ranking_instrutores(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     complemento_where = " AND " if where_clause else " WHERE "
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         WITH DadosTreinamento AS (
@@ -212,22 +195,22 @@ def buscar_ranking_instrutores(_engine, grupo_cliente=None, unidade=None, data_i
             FROM public.fato_treinamentos GROUP BY processo
         )
         SELECT 
-            fc.instrutor, COUNT(DISTINCT fc.processo) AS turmas_realizadas, SUM(COALESCE(dt.qtd_pessoas, 0)) AS pessoas_treinadas, AVG(dt.media_turma) AS nota_media
+            fc.instrutor_1 AS instrutor, COUNT(DISTINCT fc.processo) AS turmas_realizadas, SUM(COALESCE(dt.qtd_pessoas, 0)) AS pessoas_treinadas, AVG(dt.media_turma) AS nota_media
         FROM public.mv_fato_comercial_tratada fc
         LEFT JOIN DadosTreinamento dt ON fc.processo = dt.processo
         {where_clause} {complemento_where} {col_data} <= CURRENT_DATE
           AND fc.validacao IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR')
-          AND fc.instrutor IS NOT NULL AND fc.instrutor != ''
-        GROUP BY fc.instrutor ORDER BY turmas_realizadas DESC
+          AND fc.instrutor_1 IS NOT NULL AND fc.instrutor_1 != ''
+        GROUP BY fc.instrutor_1 ORDER BY turmas_realizadas DESC
     """)
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_detalhamento_financeiro(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_detalhamento_financeiro(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    col_data = "fc.dt_termino_ead" if modo_visao == "EAD" else "fc.dt_termino_presencial"
+    col_data = "fc.dt_termino_presencial"
 
     query = text(f"""
         SELECT 
@@ -260,7 +243,10 @@ def buscar_detalhamento_financeiro(_engine, grupo_cliente=None, unidade=None, da
             COALESCE(fv.saldo_m, 0) AS "Saldo Final (R$)"
         FROM public.mv_fato_comercial_tratada fc
         LEFT JOIN public.mv_fato_valores_tratada fv ON fc.pedido_de_compra = fv.pedido_de_compra
-        {where_clause} AND fc.validacao NOT IN ('REAGENDADO', 'CANCELADO') AND COALESCE(fc.valor_turma, 0) > 0
+        {where_clause} 
+          AND UPPER(COALESCE(fc.validacao, '')) NOT IN ('REAGENDADO', 'CANCELADO') 
+          AND UPPER(COALESCE(fc.status_comercial, '')) NOT IN ('REAGENDADO', 'CANCELADO')
+          AND COALESCE(fc.valor_turma, 0) > 0
         ORDER BY {col_data} DESC
     """)
     with _engine.connect() as conn:
@@ -268,7 +254,7 @@ def buscar_detalhamento_financeiro(_engine, grupo_cliente=None, unidade=None, da
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def buscar_lista_participantes(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Consolidado (Geral)"):
+def buscar_lista_participantes(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     complemento_where = " AND " if where_clause else " WHERE "
 
@@ -276,7 +262,7 @@ def buscar_lista_participantes(_engine, grupo_cliente=None, unidade=None, data_i
         SELECT 
             ft.nome_do_participante AS "Nome do Participante", ft.cpf AS "CPF", fc.grupo AS "Grupo",
             ft.nr AS "Treinamento (NR)", ft.tipo AS "Tipo",
-            CASE WHEN '{modo_visao}' = 'EAD' THEN fc.termino_ead_str ELSE fc.termino_1_str END AS "Data Conclusão",
+            fc.termino_1 AS "Data Conclusão",
             fc.unidade AS "Unidade"
         FROM public.fato_treinamentos ft
         INNER JOIN public.mv_fato_comercial_tratada fc ON ft.processo = fc.processo
@@ -285,3 +271,227 @@ def buscar_lista_participantes(_engine, grupo_cliente=None, unidade=None, data_i
     """)
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def buscar_ranking_vendedores(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    complemento_where = " AND " if where_clause else " WHERE "
+    col_data = "fc.dt_termino_presencial"
+
+    query = text(f"""
+        SELECT 
+            COALESCE(NULLIF(TRIM(fc.executivo_de_vendas), ''), 'NÃO INFORMADO') AS executivo,
+            COUNT(DISTINCT fc.processo) AS turmas_vendidas,
+            SUM(COALESCE(fc.valor_turma, 0)) AS valor_total_vendido
+        FROM public.mv_fato_comercial_tratada fc
+        {where_clause} {complemento_where} {col_data} <= CURRENT_DATE
+          AND fc.validacao IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR')
+        GROUP BY executivo ORDER BY valor_total_vendido DESC
+    """)
+    with _engine.connect() as conn:
+        return pd.read_sql_query(query, conn, params=params)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_fim, modo_visao):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    complemento_where = " AND " if where_clause else " WHERE "
+    
+    # Este SQL gigante traduz perfeitamente as regras RF01 a RF35 do documento
+    sql = f"""
+    WITH base AS (
+        SELECT 
+            fc.processo AS id_processo, 
+            fc.grupo, 
+            fc.cliente, 
+            fc.unidade, 
+            fc.modalidade,
+            COALESCE(fc.valor_turma, 0) AS valor_total,
+            -- RF03: Tratamento de status vazio para "Em Programação"
+            COALESCE(NULLIF(TRIM(fc.validacao), ''), 'Em Programação') AS validacao,
+            fc.status_comercial,
+            fc.dt_inicio_presencial AS data_inicio,
+            fc.dt_termino_presencial AS data_termino,
+            COALESCE(cli.faturamento, 'MEDIÇÃO') AS tipo_faturamento,
+            f.nota_fiscal, 
+            f.data_faturamento AS data_emissao, 
+            f.data_vencimento, 
+            f.data_pagamento,
+            fc.pedido_de_compra AS pedido_compra, -- CORRIGIDO AQUI
+            fc.folha_de_servico AS folha_servico  -- CORRIGIDO AQUI TAMBÉM
+        FROM mv_fato_comercial_tratada fc 
+        LEFT JOIN fato_faturamento f ON fc.processo = f.processo
+        LEFT JOIN dim_clientes cli ON fc.cod_cliente = cli.cod_cliente
+        {where_clause}
+    ),
+    logica_datas AS (
+        SELECT 
+            *,
+            -- RF07 e RF13: D e D+1
+            data_inicio AS data_d,
+            (data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
+            
+            -- RF15 a RF18: Ciclo Mensal de Medição
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna, -- Dia 10
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente, -- Último dia do mês subsequente
+            
+            -- Tratamento de datas do Financeiro
+            to_date(NULLIF(TRIM(data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
+            to_date(NULLIF(TRIM(data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
+            to_date(NULLIF(TRIM(data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf
+        FROM base
+    )
+    SELECT 
+        *,
+        -- STATUS OPERACIONAL (RF03, RF07, RF11, RF12)
+        CASE 
+            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Cancelado com Cobrança'
+            WHEN UPPER(validacao) = 'CANCELADO' THEN 'Cancelado'
+            WHEN UPPER(validacao) = 'REAGENDADO' THEN 'Reagendado'
+            WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para Faturamento'
+            WHEN CURRENT_DATE >= data_d_mais_1 THEN 'Realizado'
+            WHEN UPPER(validacao) = 'CONFIRMADO' THEN 'Confirmado'
+            ELSE 'Em Programação'
+        END AS status_operacional,
+        
+        -- STATUS DE MEDIÇÃO E FATURAMENTO (RF08, RF13 a RF18, RF21)
+        CASE
+            WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'Não Cobrável'
+            WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para NF'
+            
+            -- REGRA: PONTUAL (RF13)
+            WHEN UPPER(tipo_faturamento) = 'PONTUAL' THEN
+                CASE 
+                    WHEN CURRENT_DATE = data_d THEN 'Cobrável em D'
+                    WHEN CURRENT_DATE >= data_d_mais_1 THEN 'Faturamento pendente - prazo vencido'
+                    ELSE 'Aguardando data de realização'
+                END
+            
+            -- REGRA: MEDIÇÃO (RF15 a RF18)
+            ELSE 
+                CASE
+                    WHEN CURRENT_DATE < mes_subsequente_inicio THEN 'Aguardando virada do mês'
+                    WHEN CURRENT_DATE <= limite_medicao_interna THEN 'Medição em processamento'
+                    WHEN CURRENT_DATE <= limite_validacao_cliente THEN 'Aguardando validação do cliente'
+                    ELSE 'Medição em atraso cliente'
+                END
+        END AS status_medicao,
+        
+        -- CÁLCULO DE DIAS DE ATRASO DA MEDIÇÃO/FATURAMENTO (RF35)
+        CASE 
+            WHEN UPPER(validacao) = 'FATURAR' THEN 0
+            WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND CURRENT_DATE >= data_d_mais_1 THEN (CURRENT_DATE - data_d_mais_1)
+            WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE > limite_validacao_cliente THEN (CURRENT_DATE - limite_validacao_cliente)
+            ELSE 0
+        END AS dias_atraso_medicao,
+
+        -- STATUS DE PAGAMENTO / NF (RF23 a RF28)
+        CASE
+            WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'N/A'
+            WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Aguardando emissão de NF'
+            WHEN dt_emissao_nf IS NULL THEN 'NF Não Emitida'
+            WHEN dt_pagamento_nf IS NOT NULL THEN
+                CASE WHEN dt_pagamento_nf <= dt_vencimento_nf THEN 'Pago no Prazo' ELSE 'Pago com Atraso' END
+            WHEN CURRENT_DATE <= dt_vencimento_nf THEN 'A vencer / Em aberto'
+            ELSE 'Pagamento em Atraso'
+        END AS status_pagamento,
+        
+        -- CÁLCULO DE DIAS DE ATRASO DE PAGAMENTO (RF27, RF35)
+        CASE
+            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN (CURRENT_DATE - dt_vencimento_nf)
+            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NOT NULL AND dt_pagamento_nf > dt_vencimento_nf THEN (dt_pagamento_nf - dt_vencimento_nf)
+            ELSE 0
+        END AS dias_atraso_pagamento,
+        
+        -- RESPONSÁVEL PELA PRÓXIMA AÇÃO (RF29)
+        CASE 
+            WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Financeiro'
+            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN 'Cliente'
+            WHEN UPPER(validacao) != 'FATURAR' THEN
+                CASE 
+                    WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE BETWEEN mes_subsequente_inicio AND limite_medicao_interna THEN 'Gestão de Contratos / Interno'
+                    WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE > limite_medicao_interna THEN 'Cliente'
+                    WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND CURRENT_DATE >= data_d_mais_1 THEN 'Gestão de Contratos / Interno'
+                    ELSE 'Gestão de Contratos / Interno'
+                END
+            ELSE 'Nenhum'
+        END AS responsavel_acao
+
+    FROM logica_datas
+    """
+    
+    return pd.read_sql_query(text(sql), _engine, params=params)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    complemento_where = " AND " if where_clause else " WHERE "
+    
+    # Buscamos as colunas de receita, instrutores e validação
+    query = text(f"""
+        SELECT 
+            fc.processo,
+            fc.cliente,
+            fc.instrutor,
+            COALESCE(fc.valor_turma, 0) AS receita,
+            fc.instrutor_1_total,
+            fc.instrutor_2_total,
+            fc.validacao,
+            fc.status_comercial
+        FROM public.mv_fato_comercial_tratada fc
+        {where_clause} {complemento_where} 
+            UPPER(fc.validacao) NOT IN ('CANCELADO', 'REAGENDADO') 
+            AND UPPER(fc.status_comercial) NOT IN ('CANCELADO', 'REAGENDADO')
+    """)
+    
+    with _engine.connect() as conn:
+        df = pd.read_sql_query(query, conn, params=params)
+        
+        # Função para limpar sujeiras de texto nos valores (R$, vírgulas, etc.)
+        def limpar_moeda(val):
+            if pd.isna(val) or val == '': return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            v_str = str(val).replace('R$', '').strip()
+            if ',' in v_str and '.' in v_str:
+                v_str = v_str.replace('.', '').replace(',', '.')
+            elif ',' in v_str:
+                v_str = v_str.replace(',', '.')
+            try:
+                return float(v_str)
+            except:
+                return 0.0
+                
+        if not df.empty:
+            if 'instrutor_1_total' not in df.columns: df['instrutor_1_total'] = 0.0
+            if 'instrutor_2_total' not in df.columns: df['instrutor_2_total'] = 0.0
+            
+            df['receita'] = df['receita'].apply(limpar_moeda)
+            
+            # Filtra apenas turmas com receita maior que 0 (evita divisão por zero da planilha)
+            df = df[df['receita'] > 0].copy()
+            
+            if not df.empty:
+                df['custo_instrutor_1'] = df['instrutor_1_total'].apply(limpar_moeda)
+                df['custo_instrutor_2'] = df['instrutor_2_total'].apply(limpar_moeda)
+                
+                # ====================================================
+                # CÁLCULO DE CUSTO BASEADO NA FÓRMULA DO CLIENTE
+                # ====================================================
+                # Custo = (Receita * 25%) + 400 Fixo + Inst 1 + Inst 2
+                df['custo_impostos_comissao'] = df['receita'] * 0.25
+                df['custo_fixo'] = 400.0
+                
+                df['custo_total'] = (
+                    df['custo_impostos_comissao'] + 
+                    df['custo_fixo'] + 
+                    df['custo_instrutor_1'] + 
+                    df['custo_instrutor_2']
+                )
+                
+                # Lucro Real (R$) e Margem (%)
+                df['margem_lucro'] = df['receita'] - df['custo_total']
+                df['margem_percentual'] = (df['margem_lucro'] / df['receita']) * 100
+                
+        return df
+
+    
