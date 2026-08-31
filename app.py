@@ -198,12 +198,13 @@ else:
     if user["perfil"] == "admin":
         comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
         financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
+        importacao = st.Page("views/7_importacao.py", title="Sincronizar Dados", icon="🔄") # <-- NOVO
         usuarios = st.Page("views/6_usuarios.py", title="Usuários e Acessos", icon="👥")
         
         pg = st.navigation({
             "📊 Análises e Operação": paginas_cliente,
-            "💼 Comercial e Financeiro": [comercial, financeiro], # <- NOVO NOME AQUI
-            "🛠️ Configurações do Sistema": [usuarios]
+            "💼 Comercial e Financeiro": [comercial, financeiro],
+            "🛠️ Configurações do Sistema": [importacao, usuarios]
         })
     else:
         pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})

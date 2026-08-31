@@ -331,11 +331,11 @@ def recriar_views(engine):
 if __name__ == "__main__":
     planilhas = {
         "dim_instrutores": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=2064220220",
-        "fato_comercial": "https://docs.google.com/spreadsheets/d/1zkfSjlvdgid3D2EZoYKW6BNvMwxhwyGbmFrVQ3jxh0Y/export?format=csv&gid=1723286423",
+        "fato_comercial": "https://docs.google.com/spreadsheets/d/14pmwdJL2YAPBRmdabrD2WnbmDsEs8cAK1te8JmE75h4/export?format=csv&gid=1723286423",
         "fato_treinamentos": "https://docs.google.com/spreadsheets/d/1IEJVUpt8Z-Bxov6KDfqJ9BRbxZ8-NJ-LHs-D06mhWE4/export?format=csv&gid=392845010",
-        "fato_valores": "https://docs.google.com/spreadsheets/d/1UvXfXwjXOO0dd0dzvHJB49YrInGGlh0LugFhVvOFkJI/export?format=csv&gid=137403279",
-        "fato_faturamento": "https://docs.google.com/spreadsheets/d/1UvXfXwjXOO0dd0dzvHJB49YrInGGlh0LugFhVvOFkJI/export?format=csv&gid=168836866",
-        "dim_clientes": "https://docs.google.com/spreadsheets/d/1uVrYVCQ1xVeoeNmlVHp6KB0CRyA8mu7JdML9hFzgYdk/export?format=csv&gid=1660918080",
+        "fato_valores": "https://docs.google.com/spreadsheets/d/1fApHv-xutoZLr6hwDlZwTh2OBYyWIA23tcB4r6O57NQ/export?format=csv&gid=137403279",
+        "fato_faturamento": "https://docs.google.com/spreadsheets/d/1fApHv-xutoZLr6hwDlZwTh2OBYyWIA23tcB4r6O57NQ/export?format=csv&gid=168836866",
+        "dim_clientes": "https://docs.google.com/spreadsheets/d/1d_8PJE-oHVZ3x7pwAHqcfMPRP_zdT0NJzCSXfrMb8ZE/export?format=csv&gid=1660918080",
     }
 
     print("removendo estruturas antigas...")
