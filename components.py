@@ -25,65 +25,103 @@ def aplicar_identidade_visual():
             background-repeat: no-repeat !important;
             background-attachment: fixed !important;
         }}
-        [data-testid="stHeader"] {{
-            background-color: transparent !important;
-        }}
         """
 
     css = f"""
     <style>
     {css_bg}
     
+    /* 🔒 TRAVA DO TEMA: Oculta menu e Header */
+    [data-testid="stHeader"] {{ display: none !important; }}
+    [data-testid="stToolbar"] {{ display: none !important; }}
+    #MainMenu {{ display: none !important; }}
+    
     /* =========================================================
-       1. MENU LATERAL (SIDEBAR) PREMIUM - Azul Escuro 
+       1. MENU LATERAL (SIDEBAR) E CORES
        ========================================================= */
     [data-testid="stSidebar"] {{
         background-color: #1a1e38 !important;
-        border-right: 3px solid #aecb36 !important; /* Linha divisória verde */
+        border-right: 3px solid #aecb36 !important;
     }}
     
-    /* Textos e Ícones do Menu em Branco e Verde */
-    [data-testid="stSidebarNav"] span {{
-        color: #fdfdfd !important;
-        font-weight: 500 !important;
-        font-size: 15px !important;
-    }}
-    [data-testid="stSidebarNav"] svg {{
-        fill: #aecb36 !important; /* Ícones em Verde Querino */
-        color: #aecb36 !important;
-    }}
-    
-    /* Efeito ao passar o mouse ou item selecionado no Menu */
+    [data-testid="stSidebarNav"] span {{ color: #fdfdfd !important; font-weight: 500 !important; font-size: 15px !important; }}
+    [data-testid="stSidebarNav"] svg {{ fill: #aecb36 !important; color: #aecb36 !important; }}
     [data-testid="stSidebarNav"] a:hover,
     [data-testid="stSidebarNav"] a[aria-current="page"] {{
         background-color: rgba(174, 203, 54, 0.15) !important;
         border-radius: 8px !important;
     }}
-
-    /* Textos gerais dentro da sidebar */
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{
-        color: #fdfdfd;
-    }}
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{ color: #fdfdfd; }}
 
     /* =========================================================
-       2. CARDS DE KPI (MÉTRICAS) COM ANIMAÇÃO E BORDA
+       2. ORGANIZAÇÃO: PERFIL NO TOPO E SAIR NO RODAPÉ (FLEX MÁGICO)
+       ========================================================= */
+    /* Transforma a sidebar em uma coluna flexível real */
+    [data-testid="stSidebarContent"] {{
+        display: flex !important;
+        flex-direction: column !important;
+    }}
+
+    /* "Desempacota" a div que o Streamlit cria para podermos reordenar os itens soltos */
+    [data-testid="stSidebarUserContent"] {{
+        display: contents !important;
+    }}
+
+    /* 1º ELEMENTO: PERFIL VAI PARA O TOPO ABSOLUTO */
+    [data-testid="stSidebarUserContent"] > div:has(#profile-card) {{
+        order: 1 !important;
+        padding: 20px 15px 0px 15px !important;
+    }}
+
+    /* 2º ELEMENTO: MENU FICA LOGO ABAIXO DO PERFIL */
+    [data-testid="stSidebarNav"] {{
+        order: 2 !important;
+        padding-top: 15px !important;
+    }}
+
+    /* 3º ELEMENTO: BOTÃO DE SAIR EMPURRADO PARA O FUNDO */
+    [data-testid="stSidebarUserContent"] > div:has(.stButton) {{
+        order: 3 !important;
+        margin-top: auto !important; /* <-- A MÁGICA: O 'auto' empurra o botão pro limite do rodapé! */
+        padding: 15px !important;
+        padding-bottom: 30px !important;
+    }}
+
+    /* Estilo do Botão de Sair */
+    [data-testid="stSidebar"] div.stButton > button {{
+        background-color: transparent !important;
+        border: 1px solid #da2c38 !important;
+        color: #da2c38 !important;
+        min-height: 40px !important;
+        border-radius: 6px !important;
+        width: 100% !important;
+    }}
+    [data-testid="stSidebar"] div.stButton > button * {{
+        color: #da2c38 !important;
+        font-weight: bold !important;
+    }}
+    [data-testid="stSidebar"] div.stButton > button:hover {{ background-color: #da2c38 !important; }}
+    [data-testid="stSidebar"] div.stButton > button:hover * {{ color: #ffffff !important; }}
+
+    /* =========================================================
+       3. CARDS DE KPI (MÉTRICAS) COM ANIMAÇÃO E BORDA
        ========================================================= */
     [data-testid="metric-container"] {{
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
-        border-top: 4px solid #aecb36; /* Fio verde no topo do card */
+        border-top: 4px solid #aecb36;
         padding: 15px;
         border-radius: 10px;
         box-shadow: 2px 4px 10px rgba(0,0,0,0.04);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }}
     [data-testid="metric-container"]:hover {{
-        transform: translateY(-4px); /* Levanta o card ao passar o mouse */
+        transform: translateY(-4px);
         box-shadow: 2px 8px 20px rgba(0,0,0,0.1);
     }}
     
     /* =========================================================
-       3. BOTÕES PRINCIPAIS (TELA BRANCA)
+       4. BOTÕES PRINCIPAIS (TELA BRANCA)
        ========================================================= */
     [data-testid="stMainBlockContainer"] div.stButton > button {{
         width: 100%; min-height: 95px; border-radius: 10px;
@@ -94,59 +132,25 @@ def aplicar_identidade_visual():
         background-color: #1a1e38; color: #ffffff; transform: translateY(-3px); 
         box-shadow: 2px 5px 15px rgba(26, 30, 56, 0.3);
     }}
-
-    /* =========================================================
-       4. BOTÃO DE SAIR NA BARRA LATERAL (Fundo Escuro)
-       ========================================================= */
-    [data-testid="stSidebar"] div.stButton > button {{
-        background-color: transparent !important;
-        border: 1px solid #da2c38 !important;
-        color: #da2c38 !important;
-        min-height: 40px !important;
-        border-radius: 6px !important;
-        margin-top: 10px;
-    }}
-    [data-testid="stSidebar"] div.stButton > button * {{
-        color: #da2c38 !important;
-        font-weight: bold !important;
-    }}
-    [data-testid="stSidebar"] div.stButton > button:hover {{
-        background-color: #da2c38 !important;
-    }}
-    [data-testid="stSidebar"] div.stButton > button:hover * {{
-        color: #ffffff !important;
-    }}
     
     /* =========================================================
        5. CAMPOS DE FILTRO ARREDONDADOS E ELEGANTES
        ========================================================= */
-    [data-baseweb="select"] > div, [data-baseweb="input"] > div {{
-        border-radius: 8px !important;
-    }}
+    [data-baseweb="select"] > div, [data-baseweb="input"] > div {{ border-radius: 8px !important; }}
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
 
+
 def renderizar_filtros():
     aplicar_identidade_visual()
 
+    # Perfil e Botão estão no app.py! Não os chame aqui.
+    
     user = st.session_state.get("usuario_logado")
     if not user:
         st.warning("Acesso negado. Por favor, faça login.")
         st.stop()
-
-    # O card do usuário agora tem fundo semi-transparente para combinar com a sidebar azul
-    st.sidebar.markdown(
-        f"""
-        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 5px; border-left: 4px solid #aecb36;">
-            <p style="margin: 0; font-weight: bold; color: #fdfdfd; font-size: 15px;">👤 {user['nome']}</p>
-            <p style="margin: 0; font-size: 11px; color: #aecb36; font-weight: bold; letter-spacing: 1px; margin-top: 3px;">PERFIL: {user['perfil'].upper()}</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
-        st.session_state["usuario_logado"] = None
-        st.rerun()
 
     engine = get_engine()
 

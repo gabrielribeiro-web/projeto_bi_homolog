@@ -40,7 +40,7 @@ def tela_login():
             border-radius: 8px !important;
         }
         
-        /* ⬛ Letras do Botão: Força a ficarem Azul Escuro (anulando a regra da letra branca) */
+        /* ⬛ Letras do Botão: Força a ficarem Azul Escuro */
         button[kind="formSubmit"] *, 
         button[kind="secondary"] *,
         div[data-testid="stFormSubmitButton"] > button * {
@@ -172,20 +172,29 @@ def tela_login():
 
 user = st.session_state.get("usuario_logado")
 
-# Se não estiver logado OU precisar trocar a senha provisória, trava na tela de Login
 if not user or user.get("primeiro_acesso") == 1:
     pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
 
 else:
-    # 1. Telas PÚBLICAS (Acesso para Admin e Clientes)
+    # ==============================================================
+    # 1. PERFIL NO TOPO DA BARRA LATERAL (Antes do Menu)
+    # ==============================================================
+    st.sidebar.markdown(
+        f"""
+        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
+            <p style="margin: 0; font-weight: bold; color: #fdfdfd; font-size: 15px;">👤 {user['nome']}</p>
+            <p style="margin: 0; font-size: 11px; color: #aecb36; font-weight: bold; letter-spacing: 1px; margin-top: 3px;">PERFIL: {user['perfil'].upper()}</p>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
     visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
     qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
     operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️") 
     
     paginas_cliente = [visao_geral, qualidade, operacao]
 
-    # 2. Telas PRIVADAS (Apenas Admin enxerga isso)
     if user["perfil"] == "admin":
         comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
         financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
@@ -193,11 +202,17 @@ else:
         
         pg = st.navigation({
             "📊 Análises e Operação": paginas_cliente,
-            "💼 Gestão Interna (Admin)": [comercial, financeiro],
+            "💼 Comercial e Financeiro": [comercial, financeiro], # <- NOVO NOME AQUI
             "🛠️ Configurações do Sistema": [usuarios]
         })
     else:
-        # Se for o cliente, monta o menu só com as telas públicas
         pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
+
+    # ==============================================================
+    # 2. BOTÃO DE SAIR NO FUNDO DA BARRA LATERAL (Depois do Menu)
+    # ==============================================================
+    if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
+        st.session_state["usuario_logado"] = None
+        st.rerun()
 
 pg.run()
