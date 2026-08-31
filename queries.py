@@ -25,8 +25,13 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} <= TO_DATE(:data_fim, 'YYYY-MM-DD')")
         params["data_fim"] = data_fim.strftime("%Y-%m-%d")
 
-    # Isolamento de segurança: Foca em registros com componente Presencial até a chegada do EAD
-    condicoes.append("fc.modalidade LIKE '%PRESENCIAL%'")
+    # ==============================================================
+    # TRAVA DE SEGURANÇA: EXCLUSIVIDADE PRESENCIAL
+    # ==============================================================
+    # Como as regras financeiras e SLAs foram mapeadas estritamente para 
+    # a operação presencial, o sistema filtrará APENAS 'PRESENCIAL', 
+    # barrando EAD, On-line e Híbrido, independentemente do botão clicado.
+    condicoes.append("UPPER(TRIM(fc.modalidade)) = 'PRESENCIAL'")
 
     where_clause = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
     return where_clause, params
@@ -80,10 +85,10 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
                           AND UPPER(COALESCE(bt.validacao, '')) NOT IN ('CANCELADO', 'REAGENDADO')
                           AND UPPER(COALESCE(bt.status_comercial, '')) NOT IN ('CANCELADO', 'REAGENDADO')
                           AND (
-                             bt.validacao NOT IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') OR 
-                             UPPER(bt.status_comercial) LIKE '%PEDIDO%' OR 
-                             (bt.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND bt.status_comercial = 'OK' 
-                              AND bt.status_calculado NOT IN ('SALDO DISPONÍVEL', 'SALDO LIQUIDADO'))
+                              bt.validacao NOT IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') OR 
+                              UPPER(bt.status_comercial) LIKE '%PEDIDO%' OR 
+                              (bt.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND bt.status_comercial = 'OK' 
+                               AND bt.status_calculado NOT IN ('SALDO DISPONÍVEL', 'SALDO LIQUIDADO'))
                         )
                         THEN bt.valor_turma ELSE 0 END), 0) AS total_pendencia,
             
@@ -126,7 +131,7 @@ def buscar_distribuicao_tipo(_engine, grupo_cliente=None, unidade=None, data_ini
 
     query = text(f"""
         SELECT 
-            COALESCE(NULLIF(fc.modalidade, ''), 'NÃO INFORMADO') AS tipo,
+            COALESCE(NULLIF(TRIM(fc.modalidade), ''), 'NÃO INFORMADO') AS tipo,
             COUNT(DISTINCT fc.processo) AS quantidade
         FROM public.mv_fato_comercial_tratada fc
         {where_clause} {complemento_where} {col_data} <= CURRENT_DATE
@@ -294,9 +299,7 @@ def buscar_ranking_vendedores(_engine, grupo_cliente=None, unidade=None, data_in
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_fim, modo_visao):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    complemento_where = " AND " if where_clause else " WHERE "
     
-    # Este SQL gigante traduz perfeitamente as regras RF01 a RF35 do documento
     sql = f"""
     WITH base AS (
         SELECT 
@@ -316,8 +319,8 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             f.data_faturamento AS data_emissao, 
             f.data_vencimento, 
             f.data_pagamento,
-            fc.pedido_de_compra AS pedido_compra, -- CORRIGIDO AQUI
-            fc.folha_de_servico AS folha_servico  -- CORRIGIDO AQUI TAMBÉM
+            fc.pedido_de_compra AS pedido_compra,
+            fc.folha_de_servico AS folha_servico 
         FROM mv_fato_comercial_tratada fc 
         LEFT JOIN fato_faturamento f ON fc.processo = f.processo
         LEFT JOIN dim_clientes cli ON fc.cod_cliente = cli.cod_cliente
@@ -332,8 +335,8 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             
             -- RF15 a RF18: Ciclo Mensal de Medição
             (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna, -- Dia 10
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente, -- Último dia do mês subsequente
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
             
             -- Tratamento de datas do Financeiro
             to_date(NULLIF(TRIM(data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
@@ -343,7 +346,6 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
     )
     SELECT 
         *,
-        -- STATUS OPERACIONAL (RF03, RF07, RF11, RF12)
         CASE 
             WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Cancelado com Cobrança'
             WHEN UPPER(validacao) = 'CANCELADO' THEN 'Cancelado'
@@ -354,20 +356,15 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             ELSE 'Em Programação'
         END AS status_operacional,
         
-        -- STATUS DE MEDIÇÃO E FATURAMENTO (RF08, RF13 a RF18, RF21)
         CASE
             WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'Não Cobrável'
             WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para NF'
-            
-            -- REGRA: PONTUAL (RF13)
             WHEN UPPER(tipo_faturamento) = 'PONTUAL' THEN
                 CASE 
                     WHEN CURRENT_DATE = data_d THEN 'Cobrável em D'
                     WHEN CURRENT_DATE >= data_d_mais_1 THEN 'Faturamento pendente - prazo vencido'
                     ELSE 'Aguardando data de realização'
                 END
-            
-            -- REGRA: MEDIÇÃO (RF15 a RF18)
             ELSE 
                 CASE
                     WHEN CURRENT_DATE < mes_subsequente_inicio THEN 'Aguardando virada do mês'
@@ -377,7 +374,6 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
                 END
         END AS status_medicao,
         
-        -- CÁLCULO DE DIAS DE ATRASO DA MEDIÇÃO/FATURAMENTO (RF35)
         CASE 
             WHEN UPPER(validacao) = 'FATURAR' THEN 0
             WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND CURRENT_DATE >= data_d_mais_1 THEN (CURRENT_DATE - data_d_mais_1)
@@ -385,7 +381,6 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             ELSE 0
         END AS dias_atraso_medicao,
 
-        -- STATUS DE PAGAMENTO / NF (RF23 a RF28)
         CASE
             WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'N/A'
             WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Aguardando emissão de NF'
@@ -396,14 +391,12 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             ELSE 'Pagamento em Atraso'
         END AS status_pagamento,
         
-        -- CÁLCULO DE DIAS DE ATRASO DE PAGAMENTO (RF27, RF35)
         CASE
             WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN (CURRENT_DATE - dt_vencimento_nf)
             WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NOT NULL AND dt_pagamento_nf > dt_vencimento_nf THEN (dt_pagamento_nf - dt_vencimento_nf)
             ELSE 0
         END AS dias_atraso_pagamento,
         
-        -- RESPONSÁVEL PELA PRÓXIMA AÇÃO (RF29)
         CASE 
             WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Financeiro'
             WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN 'Cliente'
@@ -427,12 +420,11 @@ def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     complemento_where = " AND " if where_clause else " WHERE "
     
-    # Buscamos as colunas de receita, instrutores e validação
     query = text(f"""
         SELECT 
             fc.processo,
             fc.cliente,
-            fc.instrutor,
+            fc.instrutor_1 AS instrutor,
             COALESCE(fc.valor_turma, 0) AS receita,
             fc.instrutor_1_total,
             fc.instrutor_2_total,
@@ -447,7 +439,6 @@ def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio
     with _engine.connect() as conn:
         df = pd.read_sql_query(query, conn, params=params)
         
-        # Função para limpar sujeiras de texto nos valores (R$, vírgulas, etc.)
         def limpar_moeda(val):
             if pd.isna(val) or val == '': return 0.0
             if isinstance(val, (int, float)): return float(val)
@@ -466,18 +457,12 @@ def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio
             if 'instrutor_2_total' not in df.columns: df['instrutor_2_total'] = 0.0
             
             df['receita'] = df['receita'].apply(limpar_moeda)
-            
-            # Filtra apenas turmas com receita maior que 0 (evita divisão por zero da planilha)
             df = df[df['receita'] > 0].copy()
             
             if not df.empty:
                 df['custo_instrutor_1'] = df['instrutor_1_total'].apply(limpar_moeda)
                 df['custo_instrutor_2'] = df['instrutor_2_total'].apply(limpar_moeda)
                 
-                # ====================================================
-                # CÁLCULO DE CUSTO BASEADO NA FÓRMULA DO CLIENTE
-                # ====================================================
-                # Custo = (Receita * 25%) + 400 Fixo + Inst 1 + Inst 2
                 df['custo_impostos_comissao'] = df['receita'] * 0.25
                 df['custo_fixo'] = 400.0
                 
@@ -488,10 +473,7 @@ def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio
                     df['custo_instrutor_2']
                 )
                 
-                # Lucro Real (R$) e Margem (%)
                 df['margem_lucro'] = df['receita'] - df['custo_total']
                 df['margem_percentual'] = (df['margem_lucro'] / df['receita']) * 100
                 
         return df
-
-    

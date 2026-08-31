@@ -16,15 +16,52 @@ def tela_login():
         <style>
         [data-testid="stSidebar"] {display: none;}
         [data-testid="stHeader"] {display: none;}
+        
+        /* Fundo da tela Escuro e Elegante */
         .stApp {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
+            background: linear-gradient(135deg, #0f172a 0%, #1a1e38 100%) !important;
         }
+        
+        /* Deixa todos os textos brancos (labels, abas, parágrafos) */
         .stApp p, .stApp label, [data-baseweb="tab"] p, .stMarkdown p {
-            color: #f8fafc !important;
+            color: #fdfdfd !important;
         }
         .stTabs [data-baseweb="tab-list"] {
             justify-content: center;
             background-color: transparent;
+        }
+        
+        /* 🟩 BLINDAGEM DO BOTÃO: Força todos os botões de formulário a ficarem Verdes */
+        button[kind="formSubmit"], 
+        button[kind="secondary"],
+        div[data-testid="stFormSubmitButton"] > button {
+            background-color: #aecb36 !important; 
+            border: none !important;
+            border-radius: 8px !important;
+        }
+        
+        /* ⬛ Letras do Botão: Força a ficarem Azul Escuro (anulando a regra da letra branca) */
+        button[kind="formSubmit"] *, 
+        button[kind="secondary"] *,
+        div[data-testid="stFormSubmitButton"] > button * {
+            color: #1a1e38 !important;
+            font-weight: bold !important;
+        }
+        
+        /* Efeito de Hover (passar o mouse) */
+        button[kind="formSubmit"]:hover, 
+        div[data-testid="stFormSubmitButton"] > button:hover {
+            background-color: #fdfdfd !important;
+        }
+        
+        /* Ajuste dos inputs (Caixas de texto de E-mail e Senha) */
+        div[data-baseweb="input"] {
+            background-color: rgba(253, 253, 253, 0.1) !important;
+            border: 1px solid rgba(253, 253, 253, 0.2) !important;
+        }
+        div[data-baseweb="input"] input {
+            color: #fdfdfd !important;
+            -webkit-text-fill-color: #fdfdfd !important;
         }
         </style>
         """,
@@ -46,7 +83,7 @@ def tela_login():
             if os.path.exists("logo.png"):
                 st.image("logo.png", use_container_width=True)
             else:
-                st.markdown("<h2 style='text-align: center; color: #f8fafc;'>📊 Portal Dashboard.</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align: center; color: #fdfdfd;'>📊 Portal Dashboard.</h2>", unsafe_allow_html=True)
         
         st.write("")
 
@@ -80,8 +117,8 @@ def tela_login():
             return
 
         # CASO 2: Tela de Login Convencional
-        st.markdown("<h4 style='text-align: center; color: #f8fafc;'>Acesso ao Portal de Dashboard</h4>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px;'>Insira suas credenciais</p>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; color: #fdfdfd;'>Acesso ao Portal de Dashboard</h4>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #8e8e8e; font-size: 14px;'>Insira suas credenciais</p>", unsafe_allow_html=True)
 
         aba_login, aba_esqueci = st.tabs(["Entrar", "❓ Esqueci minha senha"])
 
@@ -121,7 +158,7 @@ def tela_login():
                     
                     st.info("**Próximo passo:** Clique abaixo para notificar nossa equipe de suporte.")
                     
-                    numero_whatsapp = "5519999999999" # Mude para o número real
+                    numero_whatsapp = "5519999999999" # Mude para o número
                     msg_zap = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera} (Grupo: {grupo_recupera})"
                     link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={msg_zap.replace(' ', '%20')}"
                     
@@ -144,7 +181,7 @@ else:
     # 1. Telas PÚBLICAS (Acesso para Admin e Clientes)
     visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
     qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
-    operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️")  # <-- Alterado para Operação
+    operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️") 
     
     paginas_cliente = [visao_geral, qualidade, operacao]
 

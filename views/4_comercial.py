@@ -14,7 +14,7 @@ if df_vendedores.empty:
 else:
     v1, v2 = st.columns([1.5, 1])
     with v1:
-        fig_vend = px.bar(df_vendedores.head(10).sort_values(by="valor_total_vendido", ascending=True), x="valor_total_vendido", y="executivo", orientation="h", title="Top Executivos por Faturamento (R$)", text_auto=".2s", color_discrete_sequence=["#84cc16"])
+        fig_vend = px.bar(df_vendedores.head(10).sort_values(by="valor_total_vendido", ascending=True), x="valor_total_vendido", y="executivo", orientation="h", title="Top Executivos por Faturamento (R$)", text_auto=".2s", color_discrete_sequence=["#aecb36"])
         fig_vend.update_layout(hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_vend, use_container_width=True)
     with v2:

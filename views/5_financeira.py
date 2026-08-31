@@ -46,8 +46,18 @@ else:
     if df_fin.empty:
         st.success("Tudo em dia! Nenhuma pendência financeira ou fatura em aberto.")
     else:
+        # Lógica para mesclar Cliente e Grupo sem poluir a tabela
+        def formatar_cliente_grupo(row):
+            grupo = str(row.get('grupo', '')).strip()
+            cliente = str(row.get('cliente', '')).strip()
+            if grupo and grupo.upper() not in ['NAN', 'NONE', ''] and grupo.upper() != cliente.upper():
+                return f"{cliente} (Grupo: {grupo})"
+            return cliente
+
+        df_fin['cliente_grupo'] = df_fin.apply(formatar_cliente_grupo, axis=1)
+
         df_exibir_fin = df_fin[[
-            'cliente', 'id_processo', 'nota_fiscal', 'data_emissao', 'data_vencimento',
+            'cliente_grupo', 'id_processo', 'nota_fiscal', 'data_emissao', 'data_vencimento',
             'valor_total', 'status_pagamento', 'responsavel_acao', 'dias_atraso_pagamento'
         ]].sort_values(by=['dias_atraso_pagamento', 'valor_total'], ascending=[False, False])
 
@@ -56,7 +66,7 @@ else:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "cliente": st.column_config.TextColumn("Cliente", width="medium"),
+                "cliente_grupo": st.column_config.TextColumn("Cliente (Grupo)", width="medium"),
                 "id_processo": "Processo",
                 "nota_fiscal": "NF",
                 "data_emissao": "Emissão",
@@ -71,15 +81,18 @@ else:
 
     st.divider()
 
-    # ==============================================================
+# ==============================================================
     # 3. RANKING DE INADIMPLÊNCIA (Item 17 do Documento)
     # ==============================================================
     st.markdown("##### 🚨 Ranking de Clientes Inadimplentes")
     if df_atraso.empty:
         st.success("Excelente! Nenhuma fatura vencida no momento.")
     else:
+        # Aplica a mesma lógica de formatação de nome para o Ranking não ficar confuso
+        df_atraso['cliente_grupo'] = df_atraso.apply(formatar_cliente_grupo, axis=1)
+        
         rk1, rk2 = st.columns([1.5, 1])
-        df_rk = df_atraso.groupby('cliente').agg(
+        df_rk = df_atraso.groupby('cliente_grupo').agg(
             valor_devido=('valor_total', 'sum'),
             qtd_faturas=('id_processo', 'count'),
             maior_atraso=('dias_atraso_pagamento', 'max')
@@ -88,17 +101,18 @@ else:
         with rk1:
             fig_rk = px.bar(
                 df_rk.head(10).sort_values(by="valor_devido", ascending=True),
-                x="valor_devido", y="cliente", orientation="h",
-                title="Top 10 Maiores Devedores (Volume em R$)", text_auto=".2s", color_discrete_sequence=["#ef4444"]
+                x="valor_devido", y="cliente_grupo", orientation="h",
+                title="Top 10 Maiores Devedores (Volume em R$)", text_auto=".2s", color_discrete_sequence=["#da2c38"]
             )
-            fig_rk.update_layout(hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            # Ajuste de layout para garantir que nomes grandes não fiquem cortados
+            fig_rk.update_layout(yaxis={'title': ''}, hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_rk, use_container_width=True)
 
         with rk2:
             st.dataframe(
                 df_rk, use_container_width=True, hide_index=True,
                 column_config={
-                    "cliente": "Cliente",
+                    "cliente_grupo": "Cliente (Grupo)",
                     "valor_devido": st.column_config.NumberColumn("Dívida Total (R$)", format="R$ %.2f"),
                     "qtd_faturas": "Qtd Faturas",
                     "maior_atraso": "Maior Atraso (Dias)"
@@ -133,7 +147,7 @@ else:
         df_instrutores_custo = df_margem.groupby('instrutor').agg(
             custo_gerado=('custo_total', 'sum')
         ).reset_index().sort_values(by='custo_gerado', ascending=False)
-        fig_custo = px.bar(df_instrutores_custo.head(10).sort_values(by="custo_gerado", ascending=True), x="custo_gerado", y="instrutor", orientation="h", title="Top 10 Instrutores (Custo Total)", text_auto=".2s", color_discrete_sequence=["#ef4444"])
+        fig_custo = px.bar(df_instrutores_custo.head(10).sort_values(by="custo_gerado", ascending=True), x="custo_gerado", y="instrutor", orientation="h", title="Top 10 Instrutores (Custo Total)", text_auto=".2s", color_discrete_sequence=["#da2c38"])
         fig_custo.update_layout(hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_custo, use_container_width=True)
 

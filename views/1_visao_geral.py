@@ -22,8 +22,8 @@ df_tipo = buscar_distribuicao_tipo(engine, grupo_sel, unidade_sel, dt_inicio, dt
 df_mes = buscar_investimento_mensal(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 df_proximas = buscar_proximas_turmas(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
-st.markdown(f"#### 💼 Visão Executiva (Consolidado) - {modo_visao}")
-st.caption("Visão 100% alinhada com as regras de Faturamento (Pontual/Medição) e Exclusividade de Indicadores.")
+st.markdown(f"#### 💼 Visão Executiva - {modo_visao}")
+st.caption("Visão de Faturamento e Indicadores.")
 
 if not df_motor.empty:
     # ==============================================================
@@ -111,19 +111,19 @@ st.divider()
 # ==============================================================
 g1, g2, g3 = st.columns([1.2, 1, 1.5])
 with g1:
-    fig_nrs = px.bar(df_nrs.head(10), x="quantidade", y="nr", orientation="h", title="Top 10 Normas (NRs)", text="quantidade", color_discrete_sequence=["#84cc16"])
+    fig_nrs = px.bar(df_nrs.head(10), x="quantidade", y="nr", orientation="h", title="Top 10 Normas (NRs)", text="quantidade", color_discrete_sequence=["#aecb36"])
     fig_nrs.update_layout(yaxis={"categoryorder": "total ascending"}, hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_nrs, use_container_width=True)
 
 with g2:
-    fig_pie = px.pie(df_tipo, values="quantidade", names="tipo", hole=0.5, title="Distribuição por Tipo", color_discrete_sequence=["#84cc16", "#38bdf8", "#a855f7"])
+    fig_pie = px.pie(df_tipo, values="quantidade", names="tipo", hole=0.5, title="Distribuição por Tipo", color_discrete_sequence=["#aecb36", "#38bdf8", "#a855f7"])
     fig_pie.update_layout(hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_pie, use_container_width=True)
 
 with g3:
     fig_mes = go.Figure()
     if "Faturamento Realizado" in df_mes.columns:
-        fig_mes.add_trace(go.Bar(x=df_mes["mes_ano"], y=df_mes["Faturamento Realizado"], name="Realizado (R$)", marker_color="#84cc16"))
+        fig_mes.add_trace(go.Bar(x=df_mes["mes_ano"], y=df_mes["Faturamento Realizado"], name="Realizado (R$)", marker_color="#aecb36"))
         fig_mes.add_trace(go.Scatter(x=df_mes["mes_ano"], y=df_mes["Faturamento Projetado"], name="Projetado (R$)", line=dict(color="#38bdf8", width=3, dash="dot")))
         fig_mes.update_layout(title=lbl_grafico_mes, yaxis=dict(title="R$"), hoverlabel=hover_style, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_mes, use_container_width=True)
