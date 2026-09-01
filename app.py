@@ -21,10 +21,10 @@ st.set_page_config(
 
 
 # ==============================================================
-# 2. DESIGN CUSTOMIZADO (TELA DE LOGIN ORIGINAL)
+# 2. DESIGN CUSTOMIZADO E RESPONSIVO (TELA DE LOGIN)
 # ==============================================================
 def tela_login():
-    # CSS de alta prioridade para blindar e estilizar a tela de login
+    # CSS de alta prioridade com suporte nativo para Smartphones (Media Queries)
     st.markdown(
         """
         <style>
@@ -92,6 +92,30 @@ def tela_login():
             fill: #1a1e38 !important;
             color: #1a1e38 !important;
         }
+
+        /* 📱 RESPONSIVIDADE ADAPTATIVA PARA NAVEGADORES MOBILE (CELULARES) */
+        @media (max-width: 768px) {
+            .main .block-container {
+                padding-left: 0.8rem !important;
+                padding-right: 0.8rem !important;
+                padding-top: 1rem !important;
+            }
+            
+            /* Força o formulário a ocupar 100% da largura em telas pequenas */
+            div[data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }
+
+            h2 { font-size: 1.3rem !important; }
+            h4 { font-size: 1.1rem !important; }
+
+            /* Melhora o espaçamento de toque nos botões e abas no mobile */
+            button {
+                min-height: 44px !important;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -100,8 +124,6 @@ def tela_login():
     col1, col2, col3 = st.columns([1, 1.2, 1])
 
     with col2:
-        st.write("")
-        st.write("")
         st.write("")
         st.write("")
 
@@ -285,7 +307,7 @@ if not verificar_token():
     pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
     pg.run()
-    st.stop()  # Trava imediata: nenhuma linha de código do dashboard executa aqui
+    st.stop()
 
 # Fluxo Autenticado
 nome_usuario = st.session_state.get("usuario_nome")
