@@ -25,12 +25,7 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} <= TO_DATE(:data_fim, 'YYYY-MM-DD')")
         params["data_fim"] = data_fim.strftime("%Y-%m-%d")
 
-    # ==============================================================
     # TRAVA DE SEGURANÇA: EXCLUSIVIDADE PRESENCIAL
-    # ==============================================================
-    # Como as regras financeiras e SLAs foram mapeadas estritamente para 
-    # a operação presencial, o sistema filtrará APENAS 'PRESENCIAL', 
-    # barrando EAD, On-line e Híbrido, independentemente do botão clicado.
     condicoes.append("UPPER(TRIM(fc.modalidade)) = 'PRESENCIAL'")
 
     where_clause = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
@@ -79,7 +74,6 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
             COALESCE(SUM(CASE WHEN (bt.validacao IS NULL OR bt.validacao = '') AND bt.dt_termino > CURRENT_DATE
                         THEN bt.valor_turma ELSE 0 END), 0) AS futuro_lancado,
             
-            -- BLINDAGEM: Exclui cancelados/reagendados do cálculo do gargalo financeiro
             COALESCE(SUM(CASE 
                         WHEN bt.dt_termino <= CURRENT_DATE 
                           AND UPPER(COALESCE(bt.validacao, '')) NOT IN ('CANCELADO', 'REAGENDADO')
@@ -277,6 +271,7 @@ def buscar_lista_participantes(_engine, grupo_cliente=None, unidade=None, data_i
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
+
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_ranking_vendedores(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
@@ -296,11 +291,12 @@ def buscar_ranking_vendedores(_engine, grupo_cliente=None, unidade=None, data_in
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
+
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_fim, modo_visao):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
     
-    sql = f"""
+    sql = text(f"""
     WITH base AS (
         SELECT 
             fc.processo AS id_processo, 
@@ -309,7 +305,6 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             fc.unidade, 
             fc.modalidade,
             COALESCE(fc.valor_turma, 0) AS valor_total,
-            -- RF03: Tratamento de status vazio para "Em Programação"
             COALESCE(NULLIF(TRIM(fc.validacao), ''), 'Em Programação') AS validacao,
             fc.status_comercial,
             fc.dt_inicio_presencial AS data_inicio,
@@ -329,16 +324,11 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
     logica_datas AS (
         SELECT 
             *,
-            -- RF07 e RF13: D e D+1
             data_inicio AS data_d,
             (data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
-            
-            -- RF15 a RF18: Ciclo Mensal de Medição
             (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
             (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
             (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
-            
-            -- Tratamento de datas do Financeiro
             to_date(NULLIF(TRIM(data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
             to_date(NULLIF(TRIM(data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
             to_date(NULLIF(TRIM(data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf
@@ -411,9 +401,11 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
         END AS responsavel_acao
 
     FROM logica_datas
-    """
+    """)
     
-    return pd.read_sql_query(text(sql), _engine, params=params)
+    with _engine.connect() as conn:
+        return pd.read_sql_query(sql, conn, params=params)
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
@@ -439,29 +431,29 @@ def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio
     with _engine.connect() as conn:
         df = pd.read_sql_query(query, conn, params=params)
         
-        def limpar_moeda(val):
-            if pd.isna(val) or val == '': return 0.0
-            if isinstance(val, (int, float)): return float(val)
-            v_str = str(val).replace('R$', '').strip()
-            if ',' in v_str and '.' in v_str:
-                v_str = v_str.replace('.', '').replace(',', '.')
-            elif ',' in v_str:
-                v_str = v_str.replace(',', '.')
-            try:
-                return float(v_str)
-            except:
-                return 0.0
-                
         if not df.empty:
+            def _limpar_moeda_vetorial(s):
+                if s is None or s.empty:
+                    return pd.Series(0.0, index=s.index if hasattr(s, 'index') else None)
+                return (
+                    s.astype(str)
+                    .str.replace('R$', '', regex=False)
+                    .str.strip()
+                    .str.replace('.', '', regex=False)
+                    .str.replace(',', '.', regex=False)
+                    .pipe(pd.to_numeric, errors='coerce')
+                    .fillna(0.0)
+                )
+
             if 'instrutor_1_total' not in df.columns: df['instrutor_1_total'] = 0.0
             if 'instrutor_2_total' not in df.columns: df['instrutor_2_total'] = 0.0
             
-            df['receita'] = df['receita'].apply(limpar_moeda)
+            df['receita'] = _limpar_moeda_vetorial(df['receita'])
             df = df[df['receita'] > 0].copy()
             
             if not df.empty:
-                df['custo_instrutor_1'] = df['instrutor_1_total'].apply(limpar_moeda)
-                df['custo_instrutor_2'] = df['instrutor_2_total'].apply(limpar_moeda)
+                df['custo_instrutor_1'] = _limpar_moeda_vetorial(df['instrutor_1_total'])
+                df['custo_instrutor_2'] = _limpar_moeda_vetorial(df['instrutor_2_total'])
                 
                 df['custo_impostos_comissao'] = df['receita'] * 0.25
                 df['custo_fixo'] = 400.0

@@ -17,12 +17,10 @@ def tela_login():
         [data-testid="stSidebar"] {display: none;}
         [data-testid="stHeader"] {display: none;}
         
-        /* Fundo da tela Escuro e Elegante */
         .stApp {
             background: linear-gradient(135deg, #0f172a 0%, #1a1e38 100%) !important;
         }
         
-        /* Deixa todos os textos brancos (labels, abas, parágrafos) */
         .stApp p, .stApp label, [data-baseweb="tab"] p, .stMarkdown p {
             color: #fdfdfd !important;
         }
@@ -31,7 +29,7 @@ def tela_login():
             background-color: transparent;
         }
         
-        /* 🟩 BLINDAGEM DO BOTÃO: Força todos os botões de formulário a ficarem Verdes */
+        /* 🟩 BOTÃO DE LOGIN VERDE QUERINO */
         button[kind="formSubmit"], 
         button[kind="secondary"],
         div[data-testid="stFormSubmitButton"] > button {
@@ -40,7 +38,6 @@ def tela_login():
             border-radius: 8px !important;
         }
         
-        /* ⬛ Letras do Botão: Força a ficarem Azul Escuro */
         button[kind="formSubmit"] *, 
         button[kind="secondary"] *,
         div[data-testid="stFormSubmitButton"] > button * {
@@ -48,20 +45,38 @@ def tela_login():
             font-weight: bold !important;
         }
         
-        /* Efeito de Hover (passar o mouse) */
         button[kind="formSubmit"]:hover, 
         div[data-testid="stFormSubmitButton"] > button:hover {
             background-color: #fdfdfd !important;
         }
         
-        /* Ajuste dos inputs (Caixas de texto de E-mail e Senha) */
-        div[data-baseweb="input"] {
-            background-color: rgba(253, 253, 253, 0.1) !important;
-            border: 1px solid rgba(253, 253, 253, 0.2) !important;
+        /* ⬜ BLINDAGEM TOTAL DOS INPUTS (E-mail e Senha 100% Brancos) */
+        div[data-testid="stTextInput"] div[data-baseweb="input"],
+        div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
+        div[data-testid="stTextInput"] input {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
         }
-        div[data-baseweb="input"] input {
-            color: #fdfdfd !important;
-            -webkit-text-fill-color: #fdfdfd !important;
+        
+        div[data-testid="stTextInput"] div[data-baseweb="input"] {
+            border: 1px solid #cccccc !important;
+            border-radius: 8px !important;
+        }
+        
+        div[data-testid="stTextInput"] input {
+            color: #1a1e38 !important;
+            -webkit-text-fill-color: #1a1e38 !important;
+            font-weight: 500 !important;
+        }
+        
+        div[data-testid="stTextInput"] button {
+            background-color: transparent !important;
+            border: none !important;
+        }
+        
+        div[data-testid="stTextInput"] svg {
+            fill: #1a1e38 !important;
+            color: #1a1e38 !important;
         }
         </style>
         """,
@@ -76,7 +91,6 @@ def tela_login():
         st.write("")
         st.write("")
 
-        # --- LOGO DA EMPRESA ---
         col_espaco1, col_logo, col_espaco2 = st.columns([1, 2, 1])
         with col_logo:
             import os
@@ -87,7 +101,6 @@ def tela_login():
         
         st.write("")
 
-        # CASO 1: Usuário logado precisando alterar a senha no PRIMEIRO ACESSO
         user = st.session_state.get("usuario_logado")
         if user and user.get("primeiro_acesso") == 1:
             st.warning("🔒 **Primeiro Acesso Detectado**")
@@ -116,7 +129,6 @@ def tela_login():
                             st.error(msg)
             return
 
-        # CASO 2: Tela de Login Convencional
         st.markdown("<h4 style='text-align: center; color: #fdfdfd;'>Acesso ao Portal de Dashboard</h4>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #8e8e8e; font-size: 14px;'>Insira suas credenciais</p>", unsafe_allow_html=True)
 
@@ -141,8 +153,9 @@ def tela_login():
 
         with aba_esqueci:
             st.caption("Para garantir a segurança dos dados, as redefinições são auditadas.")
-            email_recupera = st.text_input("E-mail de Cadastro", key="recup_email")
-            grupo_recupera = st.text_input("Grupo / Empresa", key="recup_grupo")
+            # Chaves explícitas removidas aqui para evitar duplicação no Streamlit
+            email_recupera = st.text_input("E-mail de Cadastro")
+            grupo_recupera = st.text_input("Grupo / Empresa")
             
             if st.button("Gravar Solicitação", use_container_width=True):
                 if email_recupera and grupo_recupera:
@@ -155,10 +168,9 @@ def tela_login():
                         f"Solicitou redefinição. Grupo: {grupo_recupera}",
                     )
                     st.success("✅ Solicitação gravada no sistema.")
-                    
                     st.info("**Próximo passo:** Clique abaixo para notificar nossa equipe de suporte.")
                     
-                    numero_whatsapp = "5519999999999" # Mude para o número
+                    numero_whatsapp = "5519999999999"
                     msg_zap = f"Olá! Acabei de registrar no Portal um pedido de redefinição de senha para o e-mail: {email_recupera} (Grupo: {grupo_recupera})"
                     link_whatsapp = f"https://wa.me/{numero_whatsapp}?text={msg_zap.replace(' ', '%20')}"
                     
@@ -172,17 +184,18 @@ def tela_login():
 
 user = st.session_state.get("usuario_logado")
 
+# 🔒 TELA DE LOGIN OU TROCA DE SENHA
 if not user or user.get("primeiro_acesso") == 1:
     pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
+    pg.run()
 
+# 📊 DASHBOARD PRINCIPAL
 else:
-    # ==============================================================
-    # 1. PERFIL NO TOPO DA BARRA LATERAL (Antes do Menu)
-    # ==============================================================
+    # Card de Perfil na Sidebar
     st.sidebar.markdown(
         f"""
-        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
+        <div id="profile-card" style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
             <p style="margin: 0; font-weight: bold; color: #fdfdfd; font-size: 15px;">👤 {user['nome']}</p>
             <p style="margin: 0; font-size: 11px; color: #aecb36; font-weight: bold; letter-spacing: 1px; margin-top: 3px;">PERFIL: {user['perfil'].upper()}</p>
         </div>
@@ -198,7 +211,7 @@ else:
     if user["perfil"] == "admin":
         comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
         financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
-        importacao = st.Page("views/7_importacao.py", title="Sincronizar Dados", icon="🔄") # <-- NOVO
+        importacao = st.Page("views/7_importacao.py", title="Sincronizar Dados", icon="🔄")
         usuarios = st.Page("views/6_usuarios.py", title="Usuários e Acessos", icon="👥")
         
         pg = st.navigation({
@@ -209,11 +222,10 @@ else:
     else:
         pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
 
-    # ==============================================================
-    # 2. BOTÃO DE SAIR NO FUNDO DA BARRA LATERAL (Depois do Menu)
-    # ==============================================================
+    # Botão de Logout no Rodapé
     if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
         st.session_state["usuario_logado"] = None
         st.rerun()
 
-pg.run()
+    # Executa apenas a página selecionada
+    pg.run()

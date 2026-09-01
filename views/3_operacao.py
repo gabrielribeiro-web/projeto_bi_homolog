@@ -43,7 +43,6 @@ else:
         df_interno_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Interno', na=False)]
         df_cliente_kpi = df_pendentes[df_pendentes['responsavel_acao'] == 'Cliente']
         
-        # O Admin vê atraso interno em vermelho. O Cliente vê os próprios atrasos dele em vermelho.
         op1.metric(lbl_interno, f"R$ {df_interno_kpi['valor_total'].sum():,.2f}", f"{len(df_interno_kpi)} processos", delta_color="inverse" if is_admin else "off")
         op2.metric(lbl_cliente, f"R$ {df_cliente_kpi['valor_total'].sum():,.2f}", f"{len(df_cliente_kpi)} processos", delta_color="inverse")
         
@@ -65,7 +64,6 @@ else:
             
         df_pendentes['docs_faltantes'] = df_pendentes.apply(checar_docs, axis=1)
 
-        # Lógica para mesclar Cliente e Grupo de forma inteligente
         def formatar_cliente_grupo(row):
             grupo = str(row.get('grupo', '')).strip()
             cliente = str(row.get('cliente', '')).strip()
@@ -75,23 +73,20 @@ else:
 
         df_pendentes['cliente_grupo'] = df_pendentes.apply(formatar_cliente_grupo, axis=1)
         
-        # Selecionando as colunas (agora incluindo cliente_grupo e unidade)
         df_exibir = df_pendentes[[
             'cliente_grupo', 'unidade', 'id_processo', 'data_inicio', 'valor_total', 'tipo_faturamento', 
             'status_medicao', 'responsavel_acao', 'dias_atraso_medicao', 'docs_faltantes'
         ]].sort_values(by=['dias_atraso_medicao', 'valor_total'], ascending=[False, False])
 
-        # Se for o cliente, traduzimos os nomes dos responsáveis e ocultamos a coluna 'cliente_grupo'
-        # Mas mantemos a coluna 'Unidade' para o cliente saber de onde é a cobrança!
+        # SE FOR CLIENTE: Remove 'cliente_grupo' E 'tipo_faturamento' da visualização
         if not is_admin:
             df_exibir['responsavel_acao'] = df_exibir['responsavel_acao'].replace({
                 'Gestão de Contratos / Interno': 'Equipe Querino',
                 'Cliente': 'Sua Empresa'
             })
-            if 'cliente_grupo' in df_exibir.columns:
-                df_exibir = df_exibir.drop(columns=['cliente_grupo'])
+            cols_remover = [c for c in ['cliente_grupo', 'tipo_faturamento'] if c in df_exibir.columns]
+            df_exibir = df_exibir.drop(columns=cols_remover)
         
-        # Configuração dinâmica das colunas
         col_config = {
             "id_processo": "Processo",
             "unidade": st.column_config.TextColumn("Unidade", width="medium"),
@@ -104,7 +99,6 @@ else:
             "docs_faltantes": st.column_config.TextColumn("Falta PC/FS?", help="Indica se falta Pedido de Compra (PC) ou Folha de Serviço (FS) na planilha")
         }
         
-        # Se for o Admin, mostramos a coluna com o Cliente e Grupo logo no início da tabela
         if is_admin:
             col_config["cliente_grupo"] = st.column_config.TextColumn("Cliente (Grupo)", width="medium")
 
