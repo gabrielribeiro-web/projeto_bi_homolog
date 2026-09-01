@@ -1,14 +1,18 @@
+import os
 import streamlit as st
-from auth import alterar_senha_primeiro_acesso, autenticar_usuario, registrar_log
 from database import get_engine
+from auth import autenticar_usuario, verificar_token, alterar_senha_primeiro_acesso, registrar_log
 
+# ==============================================================
+# 1. CONFIGURAÇÃO GERAL DA PÁGINA
+# ==============================================================
 st.set_page_config(
     page_title="Portal Dashboard - Grupo Querino", page_icon="📊", layout="wide"
 )
 
-if "usuario_logado" not in st.session_state:
-    st.session_state["usuario_logado"] = None
-
+# ==============================================================
+# 2. DESIGN CUSTOMIZADO (TELA DE LOGIN ORIGINAL MANTIDA 100%)
+# ==============================================================
 def tela_login():
     # --- CSS CUSTOMIZADO EXCLUSIVO PARA A TELA DE LOGIN ---
     st.markdown(
@@ -93,7 +97,6 @@ def tela_login():
 
         col_espaco1, col_logo, col_espaco2 = st.columns([1, 2, 1])
         with col_logo:
-            import os
             if os.path.exists("logo.png"):
                 st.image("logo.png", use_container_width=True)
             else:
@@ -101,8 +104,9 @@ def tela_login():
         
         st.write("")
 
-        user = st.session_state.get("usuario_logado")
-        if user and user.get("primeiro_acesso") == 1:
+        # Tratamento de Primeiro Acesso
+        primeiro_acesso_check = st.session_state.get("primeiro_acesso")
+        if primeiro_acesso_check == 1:
             st.warning("🔒 **Primeiro Acesso Detectado**")
             st.caption("Por motivos de segurança, altere a senha provisória fornecida para continuar.")
 
@@ -120,9 +124,11 @@ def tela_login():
                     elif len(nova_senha) < 6:
                         st.error("A nova senha deve ter no mínimo 6 caracteres.")
                     else:
-                        sucesso, msg = alterar_senha_primeiro_acesso(user["id"], senha_atual, nova_senha, user["email"])
+                        usuario_id = st.session_state.get("usuario_id")
+                        usuario_email = st.session_state.get("usuario_email")
+                        sucesso, msg = alterar_senha_primeiro_acesso(usuario_id, senha_atual, nova_senha, usuario_email)
                         if sucesso:
-                            st.session_state["usuario_logado"]["primeiro_acesso"] = 0
+                            st.session_state["primeiro_acesso"] = 0
                             st.success("Senha atualizada! Redirecionando...")
                             st.rerun()
                         else:
@@ -135,25 +141,51 @@ def tela_login():
         aba_login, aba_esqueci = st.tabs(["Entrar", "❓ Esqueci minha senha"])
 
         with aba_login:
+            # === INTEGRAÇÃO DO SISTEMA DE AUTENTICAÇÃO JWT + CAPTCHA ===
+            # Inicia o desafio se não existir
+            if "captcha_n1" not in st.session_state:
+                import random
+                st.session_state["captcha_n1"] = random.randint(1, 9)
+                st.session_state["captcha_n2"] = random.randint(1, 9)
+
+            n1 = st.session_state["captcha_n1"]
+            n2 = st.session_state["captcha_n2"]
+
             with st.form("form_login"):
                 email_input = st.text_input("E-mail")
                 senha_input = st.text_input("Senha", type="password")
+                
+                # Desafio Visual Anti-Robô
+                st.markdown(f"<p style='color:#8e8e8e; font-size:12px; margin-bottom: 0px;'>🤖 Verificação de Segurança: <b>Quanto é {n1} + {n2}?</b></p>", unsafe_allow_html=True)
+                resposta_captcha = st.text_input("Resultado", key="captcha_input", label_visibility="collapsed")
+                
+                st.write("") # Espaçinho
                 botao_submit = st.form_submit_button("Entrar", use_container_width=True)
 
                 if botao_submit:
-                    if not email_input or not senha_input:
-                        st.warning("Preencha todos os campos.")
+                    # 1. Checa o CAPTCHA primeiro
+                    try:
+                        if int(resposta_captcha) != (n1 + n2):
+                            st.error("❌ Resposta de segurança incorreta.")
+                            # Reseta os números pro invasor não ficar tentando o mesmo
+                            import random
+                            st.session_state["captcha_n1"] = random.randint(1, 9)
+                            st.session_state["captcha_n2"] = random.randint(1, 9)
+                            st.stop()
+                    except ValueError:
+                        st.error("❌ Digite apenas números no desafio.")
+                        st.stop()
+
+                    # 2. Se o CAPTCHA passou, tenta fazer o login real
+                    usuario_dados, msg = autenticar_usuario(email_input, senha_input)
+                    if usuario_dados:
+                        st.success("Acesso autorizado!")
+                        st.rerun() 
                     else:
-                        usuario = autenticar_usuario(email_input, senha_input)
-                        if usuario:
-                            st.session_state["usuario_logado"] = usuario
-                            st.rerun()
-                        else:
-                            st.error("E-mail ou senha incorretos.")
+                        st.error(msg)
 
         with aba_esqueci:
             st.caption("Para garantir a segurança dos dados, as redefinições são auditadas.")
-            # Chaves explícitas removidas aqui para evitar duplicação no Streamlit
             email_recupera = st.text_input("E-mail de Cadastro")
             grupo_recupera = st.text_input("Grupo / Empresa")
             
@@ -178,51 +210,53 @@ def tela_login():
                 else:
                     st.warning("Informe seu E-mail e o nome do Grupo/Empresa.")
 
-# ==========================================
-# GESTÃO DE ROTEAMENTO (NAVEGAÇÃO SEGURA)
-# ==========================================
 
-user = st.session_state.get("usuario_logado")
+# ==============================================================
+# 3. GESTÃO DE ROTEAMENTO (NAVEGAÇÃO SEGURA)
+# ==============================================================
 
-# 1. Usuário NÃO logado (ou no primeiro acesso) -> Executa APENAS a tela de login
-if not user or user.get("primeiro_acesso") == 1:
-    pg_login = st.Page(tela_login, title="Login", icon="🔑") # Sem parênteses em tela_login
+# Se NÃO houver um Token JWT válido, bloqueia tudo e chama a tela de login
+if not verificar_token():
+    pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
     pg.run()
+    st.stop()
 
-# 2. Usuário LOGADO -> Executa APENAS o dashboard
-else:
-    st.sidebar.markdown(
-        f"""
-        <div id="profile-card" style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
-            <p style="margin: 0; font-weight: bold; color: #fdfdfd; font-size: 15px;">👤 {user['nome']}</p>
-            <p style="margin: 0; font-size: 11px; color: #aecb36; font-weight: bold; letter-spacing: 1px; margin-top: 3px;">PERFIL: {user['perfil'].upper()}</p>
-        </div>
-        """, unsafe_allow_html=True
-    )
+# Se chegou aqui, o Token JWT é válido! O usuário está logado.
+nome_usuario = st.session_state.get("usuario_nome")
+perfil_usuario = st.session_state.get("perfil")
 
-    visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
-    qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
-    operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️") 
+st.sidebar.markdown(
+    f"""
+    <div id="profile-card" style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
+        <p style="margin: 0; font-weight: bold; color: #1a1e38; font-size: 15px;">👤 {nome_usuario}</p>
+        <p style="margin: 0; font-size: 11px; color: #aecb36; font-weight: bold; letter-spacing: 1px; margin-top: 3px;">PERFIL: {perfil_usuario.upper()}</p>
+    </div>
+    """, unsafe_allow_html=True
+)
+
+visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
+qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
+operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️") 
+
+paginas_cliente = [visao_geral, qualidade, operacao]
+
+if perfil_usuario == "admin":
+    comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
+    financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
+    importacao = st.Page("views/7_importacao.py", title="Sincronizar Dados", icon="🔄")
+    usuarios = st.Page("views/6_usuarios.py", title="Usuários e Acessos", icon="👥")
     
-    paginas_cliente = [visao_geral, qualidade, operacao]
+    pg = st.navigation({
+        "📊 Análises e Operação": paginas_cliente,
+        "💼 Comercial e Financeiro": [comercial, financeiro],
+        "🛠️ Configurações do Sistema": [importacao, usuarios]
+    })
+else:
+    pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
 
-    if user["perfil"] == "admin":
-        comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
-        financeiro = st.Page("views/5_financeira.py", title="Faturamento e Inadimplência", icon="💰")
-        importacao = st.Page("views/7_importacao.py", title="Sincronizar Dados", icon="🔄")
-        usuarios = st.Page("views/6_usuarios.py", title="Usuários e Acessos", icon="👥")
-        
-        pg = st.navigation({
-            "📊 Análises e Operação": paginas_cliente,
-            "💼 Comercial e Financeiro": [comercial, financeiro],
-            "🛠️ Configurações do Sistema": [importacao, usuarios]
-        })
-    else:
-        pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
+if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
+    st.session_state.clear() # Apaga o token e destrói a sessão inteira!
+    st.rerun()
 
-    if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
-        st.session_state["usuario_logado"] = None
-        st.rerun()
-
-    pg.run()
+pg.run()
