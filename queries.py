@@ -407,65 +407,75 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
         return pd.read_sql_query(sql, conn, params=params)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def buscar_analise_margem(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
-    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    complemento_where = " AND " if where_clause else " WHERE "
-    
-    query = text(f"""
-        SELECT 
-            fc.processo,
-            fc.cliente,
-            fc.instrutor_1 AS instrutor,
-            COALESCE(fc.valor_turma, 0) AS receita,
-            fc.instrutor_1_total,
-            fc.instrutor_2_total,
-            fc.validacao,
-            fc.status_comercial
-        FROM public.mv_fato_comercial_tratada fc
-        {where_clause} {complemento_where} 
-            UPPER(fc.validacao) NOT IN ('CANCELADO', 'REAGENDADO') 
-            AND UPPER(fc.status_comercial) NOT IN ('CANCELADO', 'REAGENDADO')
-    """)
-    
-    with _engine.connect() as conn:
-        df = pd.read_sql_query(query, conn, params=params)
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_analise_margem(_engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao):
+    query = """
+    SELECT 
+        fc.processo,
+        fc.cliente,
+        fc.dt_inicio_presencial AS data_inicio_presencial,
+        COALESCE(fc.instrutor_1, fc.instrutor_2, 'Não Informado') AS instrutor,
+        COALESCE(fc.valor_total, 0) AS receita,
         
-        if not df.empty:
-            def _limpar_moeda_vetorial(s):
-                if s is None or s.empty:
-                    return pd.Series(0.0, index=s.index if hasattr(s, 'index') else None)
-                return (
-                    s.astype(str)
-                    .str.replace('R$', '', regex=False)
-                    .str.strip()
-                    .str.replace('.', '', regex=False)
-                    .str.replace(',', '.', regex=False)
-                    .pipe(pd.to_numeric, errors='coerce')
-                    .fillna(0.0)
-                )
+        -- Somatório dos Custos Discriminados
+        (COALESCE(fc.custo_1_instrutor, 0) + COALESCE(fc.custo_2_instrutor, 0)) AS custo_honorario,
+        (COALESCE(fc.despesas_1_km, 0) + COALESCE(fc.despesas_2_km, 0)) AS custo_km,
+        (COALESCE(fc.despesas_1_hotel, 0) + COALESCE(fc.despesas_2_hotel, 0)) AS custo_hospedagem,
+        (COALESCE(fc.despesas_1_extras, 0) + COALESCE(fc.despesas_2_extras, 0)) AS custo_extra,
+        
+        -- Custo Operacional Total da Turma
+        (
+            COALESCE(fc.custo_1_instrutor, 0) + COALESCE(fc.despesas_1_km, 0) + 
+            COALESCE(fc.despesas_1_hotel, 0) + COALESCE(fc.despesas_1_extras, 0) +
+            COALESCE(fc.custo_2_instrutor, 0) + COALESCE(fc.despesas_2_km, 0) + 
+            COALESCE(fc.despesas_2_hotel, 0) + COALESCE(fc.despesas_2_extras, 0)
+        ) AS custo_total
+    FROM public.mv_fato_comercial_tratada fc
+    WHERE fc.dt_inicio_presencial BETWEEN :dt_inicio AND :dt_fim
+    """
+    params = {"dt_inicio": dt_inicio, "dt_fim": dt_fim}
 
-            if 'instrutor_1_total' not in df.columns: df['instrutor_1_total'] = 0.0
-            if 'instrutor_2_total' not in df.columns: df['instrutor_2_total'] = 0.0
-            
-            df['receita'] = _limpar_moeda_vetorial(df['receita'])
-            df = df[df['receita'] > 0].copy()
-            
-            if not df.empty:
-                df['custo_instrutor_1'] = _limpar_moeda_vetorial(df['instrutor_1_total'])
-                df['custo_instrutor_2'] = _limpar_moeda_vetorial(df['instrutor_2_total'])
-                
-                df['custo_impostos_comissao'] = df['receita'] * 0.25
-                df['custo_fixo'] = 400.0
-                
-                df['custo_total'] = (
-                    df['custo_impostos_comissao'] + 
-                    df['custo_fixo'] + 
-                    df['custo_instrutor_1'] + 
-                    df['custo_instrutor_2']
-                )
-                
-                df['margem_lucro'] = df['receita'] - df['custo_total']
-                df['margem_percentual'] = (df['margem_lucro'] / df['receita']) * 100
-                
-        return df
+    if grupo_sel and grupo_sel != "Todos":
+        query += " AND fc.grupo = :grupo"
+        params["grupo"] = grupo_sel
+
+    if unidade_sel and unidade_sel != "Todas":
+        query += " AND fc.unidade = :unidade"
+        params["unidade"] = unidade_sel
+
+    try:
+        return pd.read_sql_query(text(query), _engine, params=params)
+    except Exception as e:
+        st.error(f"⚠️ Erro ao consultar DRE Operacional: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_colaboradores_treinados(_engine, grupo_sel, unidade_sel, dt_inicio, dt_fim):
+    """Busca a relação de alunos treinados respeitando o filtro de grupo e unidade."""
+    query = """
+    SELECT 
+        nome_aluno AS nome,
+        -- Mascara o CPF para LGPD (Ex: ***.123.456-**)
+        CONCAT('***.', SUBSTRING(cpf_aluno FROM 4 FOR 3), '.', SUBSTRING(cpf_aluno FROM 7 FOR 3), '-**') AS cpf,
+        treinamento,
+        tipo_treinamento AS tipo,
+        data_conclusao,
+        unidade
+    FROM public.mv_alunos_treinados 
+    WHERE data_conclusao BETWEEN :dt_inicio AND :dt_fim
+    """
+    params = {"dt_inicio": dt_inicio, "dt_fim": dt_fim}
+
+    if grupo_sel and grupo_sel != "Todos":
+        query += " AND grupo = :grupo"
+        params["grupo"] = grupo_sel
+
+    if unidade_sel and unidade_sel != "Todas":
+        query += " AND unidade = :unidade"
+        params["unidade"] = unidade_sel
+
+    try:
+        return pd.read_sql_query(text(query), _engine, params=params)
+    except Exception as e:
+        # Retorna dataframe vazio se a tabela de alunos falhar ou não existir
+        return pd.DataFrame(columns=["nome", "cpf", "treinamento", "tipo", "data_conclusao", "unidade"])

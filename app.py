@@ -184,15 +184,14 @@ def tela_login():
 
 user = st.session_state.get("usuario_logado")
 
-# 🔒 TELA DE LOGIN OU TROCA DE SENHA
+# 1. Usuário NÃO logado (ou no primeiro acesso) -> Executa APENAS a tela de login
 if not user or user.get("primeiro_acesso") == 1:
-    pg_login = st.Page(tela_login, title="Login", icon="🔑")
+    pg_login = st.Page(tela_login, title="Login", icon="🔑") # Sem parênteses em tela_login
     pg = st.navigation([pg_login], position="hidden")
     pg.run()
 
-# 📊 DASHBOARD PRINCIPAL
+# 2. Usuário LOGADO -> Executa APENAS o dashboard
 else:
-    # Card de Perfil na Sidebar
     st.sidebar.markdown(
         f"""
         <div id="profile-card" style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
@@ -222,10 +221,8 @@ else:
     else:
         pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
 
-    # Botão de Logout no Rodapé
     if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
         st.session_state["usuario_logado"] = None
         st.rerun()
 
-    # Executa apenas a página selecionada
     pg.run()
