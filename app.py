@@ -141,9 +141,8 @@ def tela_login():
         aba_login, aba_esqueci = st.tabs(["Entrar", "❓ Esqueci minha senha"])
 
         with aba_login:
-            # === INTEGRAÇÃO DO SISTEMA DE AUTENTICAÇÃO JWT + CAPTCHA ===
-            # Inicia o desafio se não existir
-            if "captcha_n1" not in st.session_state:
+            # === INTEGRAÇÃO DO SISTEMA DE AUTENTICAÇÃO JWT + CAPTCHA (CORRIGIDO) ===
+            if "captcha_n1" not in st.session_state or "captcha_n2" not in st.session_state:
                 import random
                 st.session_state["captcha_n1"] = random.randint(1, 9)
                 st.session_state["captcha_n2"] = random.randint(1, 9)
@@ -151,32 +150,40 @@ def tela_login():
             n1 = st.session_state["captcha_n1"]
             n2 = st.session_state["captcha_n2"]
 
+            # Exibe erro da tentativa anterior (se houver)
+            if "msg_erro_captcha" in st.session_state:
+                st.error(st.session_state["msg_erro_captcha"])
+                del st.session_state["msg_erro_captcha"]
+
             with st.form("form_login"):
                 email_input = st.text_input("E-mail")
                 senha_input = st.text_input("Senha", type="password")
                 
-                # Desafio Visual Anti-Robô
-                st.markdown(f"<p style='color:#8e8e8e; font-size:12px; margin-bottom: 0px;'>🤖 Verificação de Segurança: <b>Quanto é {n1} + {n2}?</b></p>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<p style='color:#8e8e8e; font-size:12px; margin-bottom: 0px;'>🤖 Verificação de Segurança: <b>Quanto é {n1} + {n2}?</b></p>", 
+                    unsafe_allow_html=True
+                )
                 resposta_captcha = st.text_input("Resultado", key="captcha_input", label_visibility="collapsed")
                 
-                st.write("") # Espaçinho
+                st.write("")
                 botao_submit = st.form_submit_button("Entrar", use_container_width=True)
 
                 if botao_submit:
-                    # 1. Checa o CAPTCHA primeiro
+                    # 1. Valida a resposta do CAPTCHA
                     try:
-                        if int(resposta_captcha) != (n1 + n2):
-                            st.error("❌ Resposta de segurança incorreta.")
-                            # Reseta os números pro invasor não ficar tentando o mesmo
-                            import random
-                            st.session_state["captcha_n1"] = random.randint(1, 9)
-                            st.session_state["captcha_n2"] = random.randint(1, 9)
-                            st.stop()
+                        val_digitado = int(resposta_captcha.strip()) if resposta_captcha else None
                     except ValueError:
-                        st.error("❌ Digite apenas números no desafio.")
-                        st.stop()
+                        val_digitado = None
 
-                    # 2. Se o CAPTCHA passou, tenta fazer o login real
+                    if val_digitado != (n1 + n2):
+                        # Reseta os números do desafio para a próxima tentativa
+                        import random
+                        st.session_state["captcha_n1"] = random.randint(1, 9)
+                        st.session_state["captcha_n2"] = random.randint(1, 9)
+                        st.session_state["msg_erro_captcha"] = "❌ Resposta de segurança incorreta. Tente novamente."
+                        st.rerun()  # Recarrega a tela sincronizando a nova soma
+
+                    # 2. Se o CAPTCHA estiver correto, realiza a autenticação
                     usuario_dados, msg = autenticar_usuario(email_input, senha_input)
                     if usuario_dados:
                         st.success("Acesso autorizado!")
