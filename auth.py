@@ -97,7 +97,28 @@ def registrar_log(
     detalhes: str = None,
 ):
     """Gravação de logs de auditoria no PostgreSQL."""
-    return  # Desativado temporariamente
+    
+    ip_origem = obter_ip_cliente()
+    query = text(
+        """
+        INSERT INTO public.tb_logs_auditoria (usuario_id, usuario_email, acao, detalhes, ip_origem)
+        VALUES (:usuario_id, :email, :acao, :detalhes, :ip)
+        """
+    )
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                query,
+                {
+                    "usuario_id": usuario_id,
+                    "email": usuario_email,
+                    "acao": acao,
+                    "detalhes": detalhes,
+                    "ip": ip_origem,
+                },
+            )
+    except Exception as e:
+        print(f"Erro ao gravar log: {e}")
 
 
 # ==============================================================

@@ -6,9 +6,10 @@ import numpy as np
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
+from database import get_engine
 
-DATABASE_URL = "postgresql://postgres.dychhsqpvqtwaslujbir:Acess%40bi2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
-engine = create_engine(DATABASE_URL)
+engine = get_engine()
+
 
 
 def limpar_nome_coluna(coluna):
