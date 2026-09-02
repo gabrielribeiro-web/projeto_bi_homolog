@@ -25,7 +25,6 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
         condicoes.append(f"{campo_data} IS NOT NULL AND {campo_data} <= TO_DATE(:data_fim, 'YYYY-MM-DD')")
         params["data_fim"] = data_fim.strftime("%Y-%m-%d")
 
-    # TRAVA DE SEGURANÇA: EXCLUSIVIDADE PRESENCIAL
     condicoes.append("UPPER(TRIM(fc.modalidade)) = 'PRESENCIAL'")
 
     where_clause = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
@@ -304,6 +303,8 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             fc.cliente, 
             fc.unidade, 
             fc.modalidade,
+            fc.cod_treinamento,
+            fc.exigencia_para_faturamento,
             COALESCE(fc.valor_turma, 0) AS valor_total,
             COALESCE(NULLIF(TRIM(fc.validacao), ''), 'Em Programação') AS validacao,
             fc.status_comercial,
@@ -328,7 +329,7 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
             (data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
             (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
             (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
+            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
             to_date(NULLIF(TRIM(data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
             to_date(NULLIF(TRIM(data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
             to_date(NULLIF(TRIM(data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf
@@ -477,5 +478,4 @@ def buscar_colaboradores_treinados(_engine, grupo_sel, unidade_sel, dt_inicio, d
     try:
         return pd.read_sql_query(text(query), _engine, params=params)
     except Exception as e:
-        # Retorna dataframe vazio se a tabela de alunos falhar ou não existir
         return pd.DataFrame(columns=["nome", "cpf", "treinamento", "tipo", "data_conclusao", "unidade"])
