@@ -1,5 +1,4 @@
 import datetime
-import random
 import bcrypt
 import jwt
 import pandas as pd
@@ -19,9 +18,9 @@ except Exception:
 
 
 # ==============================================================
-# 1. GESTÃO DE TOKENS JWT & SESSÃO SILENCIOSA
+# 1. GESTÃO DE TOKENS JWT & SESSÃO PERSISTENTE (RESISTENTE AO F5)
 # ==============================================================
-def gerar_token_jwt(usuario_dados: dict, duracao_horas: int = 4) -> str:
+def gerar_token_jwt(usuario_dados: dict, duracao_horas: int = 8) -> str:
     """Gera um Token JWT assinado com prazo de expiração para o usuário logado."""
     payload = {
         "id": usuario_dados["id"],
@@ -37,15 +36,17 @@ def gerar_token_jwt(usuario_dados: dict, duracao_horas: int = 4) -> str:
 
 
 def verificar_token() -> bool:
-    """Valida se o token JWT armazenado na sessão do cliente ainda é válido."""
-    if "token" not in st.session_state or not st.session_state["token"]:
+    """
+    Valida se o token JWT na memória ou na URL (st.query_params) ainda é válido.
+    Permite atualizar a página (F5) sem derrubar a sessão do usuário.
+    """
+    token = st.session_state.get("token") or st.query_params.get("session_token")
+    if not token:
         return False
+
     try:
-        dados = jwt.decode(
-            st.session_state["token"], JWT_SECRET, algorithms=[JWT_ALGORITHM]
-        )
-        
-        # Cria o dicionário completo que os componentes/views esperam
+        dados = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
         user_dict = {
             "id": dados["id"],
             "nome": dados["nome"],
@@ -54,8 +55,9 @@ def verificar_token() -> bool:
             "grupo": dados["grupo"],
             "primeiro_acesso": dados["primeiro_acesso"],
         }
-        
-        # Sincroniza tanto o objeto unificado quanto as variáveis soltas
+
+        # Sincroniza a memória do Streamlit e mantém a URL atualizada
+        st.session_state["token"] = token
         st.session_state["usuario_logado"] = user_dict
         st.session_state["usuario_id"] = dados["id"]
         st.session_state["usuario_nome"] = dados["nome"]
@@ -63,12 +65,12 @@ def verificar_token() -> bool:
         st.session_state["perfil"] = dados["perfil"]
         st.session_state["grupo"] = dados["grupo"]
         st.session_state["primeiro_acesso"] = dados["primeiro_acesso"]
+        
+        st.query_params["session_token"] = token
         return True
-    except jwt.ExpiredSignatureError:
-        st.warning("⚠️ Sua sessão expirou por inatividade. Faça login novamente.")
-        st.session_state.clear()
-        return False
-    except jwt.InvalidTokenError:
+
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        st.query_params.clear()
         st.session_state.clear()
         return False
 
@@ -97,7 +99,6 @@ def registrar_log(
     detalhes: str = None,
 ):
     """Gravação de logs de auditoria no PostgreSQL."""
-    
     ip_origem = obter_ip_cliente()
     query = text(
         """
@@ -122,16 +123,15 @@ def registrar_log(
 
 
 # ==============================================================
-# 3. AUTENTICAÇÃO SEGURA DE ETAPA ÚNICA (COM TOKEN JWT AUTOMÁTICO)
+# 3. AUTENTICAÇÃO SEGURA DE ETAPA ÚNICA
 # ==============================================================
 def autenticar_usuario(email: str, senha_informada: str):
     """
-    Autentica o usuário em 1 só clique:
-    - Valida credenciais no PostgreSQL
-    - Protege contra ataques de força bruta (Rate Limiting)
-    - Emite o Token JWT e salva na sessão de forma invisível
+    Autentica o usuário no PostgreSQL:
+    - Valida credenciais salvas
+    - Protege contra força bruta
+    - Emite o Token JWT
     """
-    # 1. Trava Anti-Robô (Bloqueio por tentativas falhas seguidas)
     if "tentativas_falhas" not in st.session_state:
         st.session_state["tentativas_falhas"] = 0
 
@@ -171,7 +171,6 @@ def autenticar_usuario(email: str, senha_informada: str):
                     if int(res.ativo) == 0:
                         return None, "Usuário inativo. Entre em contato com o administrador."
 
-                    # Sucesso: Reseta contador de falhas
                     st.session_state["tentativas_falhas"] = 0
 
                     dados_usuario = {
@@ -184,13 +183,11 @@ def autenticar_usuario(email: str, senha_informada: str):
                         "primeiro_acesso": int(res.primeiro_acesso),
                     }
 
-                    # Gera o Token JWT e armazena na sessão do Streamlit
                     token = gerar_token_jwt(dados_usuario)
                     st.session_state["token"] = token
 
                     return dados_usuario, "OK"
 
-        # Falha de credenciais
         st.session_state["tentativas_falhas"] += 1
         tentativas_restantes = 5 - st.session_state["tentativas_falhas"]
         return None, f"E-mail ou senha incorretos. ({tentativas_restantes} tentativa(s) restante(s))"

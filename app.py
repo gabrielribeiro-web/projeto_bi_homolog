@@ -1,5 +1,4 @@
 import os
-import random
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text
@@ -12,7 +11,7 @@ from auth import (
 )
 
 # ==============================================================
-# 1. CONFIGURAÇÃO GERAL DA PÁGINA (Efeito Anti-Fantasma)
+# 1. CONFIGURAÇÃO GERAL DA PÁGINA
 # ==============================================================
 st.set_page_config(
     page_title="Portal Dashboard - Grupo Querino",
@@ -23,13 +22,12 @@ st.set_page_config(
 
 
 # ==============================================================
-# 2. DESIGN CUSTOMIZADO E RESPONSIVO (TELA DE LOGIN)
+# 2. DESIGN CUSTOMIZADO E RESPONSIVO (TELA DE LOGIN SEM CAPTCHA)
 # ==============================================================
 def tela_login():
     st.markdown(
         """
         <style>
-        /* AQUI ESTÁ A CHAVE: Esconde a barra apenas quando a classe .stApp-login estiver ativa (que vamos definir depois) ou de forma global para a tela de login */
         [data-testid="stSidebar"] { display: none !important; }
         [data-testid="stHeader"] { display: none !important; }
         
@@ -66,7 +64,7 @@ def tela_login():
             background-color: #fdfdfd !important;
         }
         
-        /* ⬜ BLINDAGEM TOTAL DOS INPUTS (E-mail e Senha 100% Brancos) */
+        /* ⬜ BLINDAGEM TOTAL DOS INPUTS */
         div[data-testid="stTextInput"] div[data-baseweb="input"],
         div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
         div[data-testid="stTextInput"] input {
@@ -95,7 +93,7 @@ def tela_login():
             color: #1a1e38 !important;
         }
 
-        /* 📱 RESPONSIVIDADE ADAPTATIVA PARA NAVEGADORES MOBILE (CELULARES) */
+        /* 📱 RESPONSIVIDADE MOBILE */
         @media (max-width: 768px) {
             .main .block-container {
                 padding-left: 0.8rem !important;
@@ -172,44 +170,18 @@ def tela_login():
         aba_login, aba_esqueci = st.tabs(["Entrar", "❓ Esqueci minha senha"])
 
         with aba_login:
-            if "captcha_n1" not in st.session_state or "captcha_n2" not in st.session_state:
-                st.session_state["captcha_n1"] = random.randint(1, 9)
-                st.session_state["captcha_n2"] = random.randint(1, 9)
-
-            n1 = st.session_state["captcha_n1"]
-            n2 = st.session_state["captcha_n2"]
-
-            if "msg_erro_captcha" in st.session_state:
-                st.error(st.session_state["msg_erro_captcha"])
-                del st.session_state["msg_erro_captcha"]
-
             with st.form("form_login"):
                 email_input = st.text_input("E-mail")
                 senha_input = st.text_input("Senha", type="password")
-
-                st.markdown(
-                    f"<p style='color:#8e8e8e; font-size:12px; margin-bottom: 0px;'>🤖 Verificação de Segurança: <b>Quanto é {n1} + {n2}?</b></p>",
-                    unsafe_allow_html=True,
-                )
-                resposta_captcha = st.text_input("Resultado", key="captcha_input", label_visibility="collapsed")
 
                 st.write("")
                 botao_submit = st.form_submit_button("Entrar", use_container_width=True)
 
                 if botao_submit:
-                    try:
-                        val_digitado = int(resposta_captcha.strip()) if resposta_captcha else None
-                    except ValueError:
-                        val_digitado = None
-
-                    if val_digitado != (n1 + n2):
-                        st.session_state["captcha_n1"] = random.randint(1, 9)
-                        st.session_state["captcha_n2"] = random.randint(1, 9)
-                        st.session_state["msg_erro_captcha"] = "❌ Resposta de segurança incorreta. Tente novamente."
-                        st.rerun()
-
                     usuario_dados, msg = autenticar_usuario(email_input, senha_input)
                     if usuario_dados:
+                        # Grava o token na URL para garantir permanência após o F5
+                        st.query_params["session_token"] = st.session_state["token"]
                         st.success("Acesso autorizado!")
                         st.rerun()
                     else:
@@ -247,31 +219,27 @@ def tela_login():
 # ==============================================================
 
 if not verificar_token():
-    # REMOVIDA A INJEÇÃO DE CSS DE OCULTAÇÃO AQUI. A tela de login já faz isso.
     pg_login = st.Page(tela_login, title="Login", icon="🔑")
     pg = st.navigation([pg_login], position="hidden")
     pg.run()
     st.stop()
 
-# 3.0 INJEÇÃO DE CSS PARA GARANTIR QUE A BARRA LATERAL ESTEJA VISÍVEL QUANDO LOGADO
+# Garantia de visibilidade da barra lateral após login
 st.markdown(
     """
     <style>
-    /* Força o reaparecimento da sidebar e header após o login */
     [data-testid="stSidebar"] { display: flex !important; }
     [data-testid="stHeader"] { display: block !important; }
-    /* Mas continuamos ocultando o botão de collapse para manter ela travada aberta */
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
 nome_usuario = st.session_state.get("usuario_nome")
 perfil_usuario = st.session_state.get("perfil")
 
-# 3.1 - Cartão de Perfil (Fica no Topo)
+# Cartão de Perfil
 st.sidebar.markdown(
     f"""
     <div id="profile-card" style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #aecb36;">
@@ -282,7 +250,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-# 3.2 - Definição das Páginas e Menus
+# Menus e Navegação
 visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
 qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
 operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️")
@@ -296,7 +264,6 @@ if perfil_usuario == "admin":
     inconsistencias = st.Page("views/8_inconsistencias.py", title="Inconsistências", icon="🚨")
     auditoria = st.Page("views/9_auditoria.py", title="Auditoria e Histórico", icon="🕰️")
 
-    # Isso renderiza o menu de navegação ABAIXO do cartão de perfil
     pg = st.navigation({
         "📊 Análises e Operação": paginas_cliente,
         "💼 Comercial e Financeiro": [comercial, financeiro],
@@ -305,12 +272,11 @@ if perfil_usuario == "admin":
 else:
     pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
 
-
-# 3.3 - Botão de Sair
+# Botão de Sair (Limpa memória e token da URL)
 st.sidebar.markdown("---")
 if st.sidebar.button("🚪 Sair (Logout)", use_container_width=True):
+    st.query_params.clear()
     st.session_state.clear()
     st.rerun()
 
-# Executa a página selecionada pelo menu
 pg.run()

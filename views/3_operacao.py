@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from components import renderizar_filtros, get_hover_style
 from queries import buscar_motor_faturamento
+from database import get_engine
 
 engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros()
 hover_style = get_hover_style()
@@ -16,6 +17,15 @@ try:
     hoje = pd.to_datetime(data_sistema_db).date()
 except:
     hoje = pd.Timestamp.now().date()
+
+# ==============================================================
+# LEITURA DA TABELA DE FATURAMENTO PARA VISÃO UNIFICADA
+# ==============================================================
+try:
+    df_faturamento = pd.read_sql("SELECT processo, status_financeiro FROM fato_faturamento", engine)
+    dict_faturamento = dict(zip(df_faturamento['processo'], df_faturamento['status_financeiro']))
+except:
+    dict_faturamento = {}
 
 # ==============================================================
 # DEFINIÇÃO DE NOMENCLATURAS DINÂMICAS (ADMIN VS CLIENTE)
@@ -33,15 +43,10 @@ st.caption("Acompanhamento de medições, validações e status de documentos (P
 if df_motor.empty:
     st.info("Nenhum dado encontrado para os filtros selecionados.")
 else:
-    # -------------------------------------------------------------
-    # RECÁLCULO DOS DIAS DE ATRASO BASEADO NA MÁQUINA DO TEMPO
-    # -------------------------------------------------------------
+    # Recálculo dos dias de atraso
     if 'data_envio_estimada' in df_motor.columns:
-        # Tenta converter a data estimada para o formato correto
         df_motor['data_envio_calc'] = pd.to_datetime(df_motor['data_envio_estimada'], errors='coerce')
         
-        # Calcula os dias de atraso operacionais (Data Simulada - Data Estimada de Envio)
-        # Só calcula atraso se a data simulada for MAIOR que a data estimada
         df_motor['dias_atraso_medicao'] = df_motor.apply(
             lambda x: (hoje - x['data_envio_calc'].date()).days 
             if pd.notnull(x['data_envio_calc']) and x['data_envio_calc'].date() < hoje 
@@ -49,24 +54,39 @@ else:
             axis=1
         )
     
-    # Filtra processos que AINDA NÃO foram para o financeiro e não estão cancelados
+    # 🔄 Atualização inteligente de status (Operação + Financeiro)
+    def atualizar_status_unificado(row):
+        proc_id = row['id_processo']
+        
+        if proc_id in dict_faturamento:
+            status_fin = dict_faturamento[proc_id]
+            if status_fin == 'AGUARDA PAGAMENTO':
+                return pd.Series(['Aguardando Pagamento (Nota Emitida)', 'Cliente', 0])
+            elif status_fin == 'PAGO':
+                return pd.Series(['Finalizado (Pago)', 'Nenhum', 0])
+            else:
+                return pd.Series([f'Financeiro: {status_fin}', 'Financeiro', 0])
+        
+        return pd.Series([row['status_medicao'], row['responsavel_acao'], row.get('dias_atraso_medicao', 0)])
+
+    df_motor[['status_medicao', 'responsavel_acao', 'dias_atraso_medicao']] = df_motor.apply(atualizar_status_unificado, axis=1)
+
+    # Filtra cancelados, reagendados e os já pagos
     df_pendentes = df_motor[
         (~df_motor['status_operacional'].str.contains('Cancelado', na=False)) &
-        (df_motor['validacao'] != 'Liberado para Faturamento') &
-        (df_motor['status_operacional'] != 'Reagendado')
+        (df_motor['status_operacional'] != 'Reagendado') &
+        (df_motor['status_medicao'] != 'Finalizado (Pago)')
     ].copy()
     
     if df_pendentes.empty:
         st.success("🎉 Excelente! Nenhum processo pendente de validação.")
     else:
-        # ==============================================================
-        # 1. RESUMO DE PENDÊNCIAS OPERACIONAIS
-        # ==============================================================
+        # 1. Resumo de Responsabilidades
         st.markdown("##### 📊 Resumo de Responsabilidades")
         op1, op2, op3 = st.columns(3)
         
-        df_interno_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Interno', na=False)]
-        df_cliente_kpi = df_pendentes[df_pendentes['responsavel_acao'] == 'Cliente']
+        df_interno_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Interno|Querino', na=False, case=False)]
+        df_cliente_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Cliente', na=False, case=False)]
         
         op1.metric(lbl_interno, f"R$ {df_interno_kpi['valor_total'].sum():,.2f}", f"{len(df_interno_kpi)} processos", delta_color="inverse" if is_admin else "off")
         op2.metric(lbl_cliente, f"R$ {df_cliente_kpi['valor_total'].sum():,.2f}", f"{len(df_cliente_kpi)} processos", delta_color="inverse")
@@ -76,9 +96,7 @@ else:
         
         st.divider()
         
-        # ==============================================================
-        # 2. CARTEIRA DE PENDÊNCIAS COM GRUPO E UNIDADE
-        # ==============================================================
+        # 2. Carteira de Pendências Operacionais
         st.markdown(lbl_carteira)
         
         def checar_docs(row):
@@ -103,15 +121,40 @@ else:
             'status_medicao', 'responsavel_acao', 'dias_atraso_medicao', 'docs_faltantes'
         ]].sort_values(by=['dias_atraso_medicao', 'valor_total'], ascending=[False, False])
 
-        # SE FOR CLIENTE: Remove 'cliente_grupo' E 'tipo_faturamento' da visualização
+        # Se for perfil cliente: ajusta termos e oculta colunas restritas
         if not is_admin:
             df_exibir['responsavel_acao'] = df_exibir['responsavel_acao'].replace({
                 'Gestão de Contratos / Interno': 'Equipe Querino',
-                'Cliente': 'Sua Empresa'
+                'Financeiro Querino': 'Equipe Querino',
+                'Cliente': 'Sua Empresa',
+                'Cliente (Financeiro)': 'Sua Empresa (Financeiro)'
             })
             cols_remover = [c for c in ['cliente_grupo', 'tipo_faturamento'] if c in df_exibir.columns]
             df_exibir = df_exibir.drop(columns=cols_remover)
+
+        # 🔍 Filtro Rápido
+        col_f1, _ = st.columns([2, 1])
+        with col_f1:
+            texto_busca = st.text_input("🔎 Filtrar processos rápidos (Digite Cliente, Unidade ou Processo):")
         
+        if texto_busca:
+            termo = texto_busca.lower()
+            if is_admin:
+                mascara = (
+                    df_exibir['cliente_grupo'].str.lower().str.contains(termo, na=False) |
+                    df_exibir['unidade'].str.lower().str.contains(termo, na=False) |
+                    df_exibir['id_processo'].str.lower().str.contains(termo, na=False) |
+                    df_exibir['status_medicao'].str.lower().str.contains(termo, na=False)
+                )
+            else:
+                mascara = (
+                    df_exibir['unidade'].str.lower().str.contains(termo, na=False) |
+                    df_exibir['id_processo'].str.lower().str.contains(termo, na=False) |
+                    df_exibir['status_medicao'].str.lower().str.contains(termo, na=False)
+                )
+            df_exibir = df_exibir[mascara]
+
+        # Configuração das Colunas
         col_config = {
             "id_processo": "Processo",
             "unidade": st.column_config.TextColumn("Unidade", width="medium"),
