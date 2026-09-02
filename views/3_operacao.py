@@ -9,6 +9,15 @@ hover_style = get_hover_style()
 df_motor = buscar_motor_faturamento(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
 # ==============================================================
+# SINCRONIZAÇÃO COM A MÁQUINA DO TEMPO (RF34)
+# ==============================================================
+try:
+    data_sistema_db = pd.read_sql("SELECT data_referencia FROM tb_parametros WHERE id = 1", engine).iloc[0, 0]
+    hoje = pd.to_datetime(data_sistema_db).date()
+except:
+    hoje = pd.Timestamp.now().date()
+
+# ==============================================================
 # DEFINIÇÃO DE NOMENCLATURAS DINÂMICAS (ADMIN VS CLIENTE)
 # ==============================================================
 is_admin = user["perfil"] == "admin"
@@ -24,6 +33,22 @@ st.caption("Acompanhamento de medições, validações e status de documentos (P
 if df_motor.empty:
     st.info("Nenhum dado encontrado para os filtros selecionados.")
 else:
+    # -------------------------------------------------------------
+    # RECÁLCULO DOS DIAS DE ATRASO BASEADO NA MÁQUINA DO TEMPO
+    # -------------------------------------------------------------
+    if 'data_envio_estimada' in df_motor.columns:
+        # Tenta converter a data estimada para o formato correto
+        df_motor['data_envio_calc'] = pd.to_datetime(df_motor['data_envio_estimada'], errors='coerce')
+        
+        # Calcula os dias de atraso operacionais (Data Simulada - Data Estimada de Envio)
+        # Só calcula atraso se a data simulada for MAIOR que a data estimada
+        df_motor['dias_atraso_medicao'] = df_motor.apply(
+            lambda x: (hoje - x['data_envio_calc'].date()).days 
+            if pd.notnull(x['data_envio_calc']) and x['data_envio_calc'].date() < hoje 
+            else 0, 
+            axis=1
+        )
+    
     # Filtra processos que AINDA NÃO foram para o financeiro e não estão cancelados
     df_pendentes = df_motor[
         (~df_motor['status_operacional'].str.contains('Cancelado', na=False)) &

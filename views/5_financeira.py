@@ -10,12 +10,38 @@ hover_style = get_hover_style()
 # Busca os dados do motor central
 df_motor = buscar_motor_faturamento(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
+# ==============================================================
+# SINCRONIZAÇÃO COM A MÁQUINA DO TEMPO (RF34)
+# ==============================================================
+try:
+    data_sistema_db = pd.read_sql("SELECT data_referencia FROM tb_parametros WHERE id = 1", engine).iloc[0, 0]
+    hoje = pd.to_datetime(data_sistema_db).date()
+except:
+    hoje = pd.Timestamp.now().date()
+
 st.markdown("### 💰 Faturamento e Contas a Receber")
 st.caption("Controle de emissão de Notas Fiscais, inadimplência e rentabilidade da operação.")
 
 if df_motor.empty:
     st.info("Nenhum dado encontrado para os filtros selecionados.")
 else:
+    # Recalcula os dias de atraso usando a Data do Sistema (Máquina do Tempo)
+    if 'data_vencimento' in df_motor.columns and 'status_pagamento' in df_motor.columns:
+        # Converte a data de vencimento
+        df_motor['vencimento_calc'] = pd.to_datetime(df_motor['data_vencimento'], format="%d/%m/%Y", errors='coerce')
+        
+        # 1. Atualiza o status financeiro de acordo com a Máquina do Tempo
+        df_motor.loc[(df_motor['vencimento_calc'].notnull()) & (df_motor['vencimento_calc'].dt.date < hoje) & (df_motor['status_pagamento'] == 'A vencer / Em aberto'), 'status_pagamento'] = 'Pagamento em Atraso'
+        df_motor.loc[(df_motor['vencimento_calc'].notnull()) & (df_motor['vencimento_calc'].dt.date >= hoje) & (df_motor['status_pagamento'] == 'Pagamento em Atraso'), 'status_pagamento'] = 'A vencer / Em aberto'
+        
+        # 2. Calcula os dias de atraso exatos com base na data simulada
+        df_motor['dias_atraso_pagamento'] = df_motor.apply(
+            lambda x: (hoje - x['vencimento_calc'].date()).days 
+            if pd.notnull(x['vencimento_calc']) and x['status_pagamento'] == 'Pagamento em Atraso' 
+            else 0, 
+            axis=1
+        )
+
     # Filtra apenas os processos que já entraram na esteira financeira
     df_fin = df_motor[df_motor['status_pagamento'].isin([
         'Aguardando emissão de NF',
@@ -132,13 +158,11 @@ else:
     df_margem = df_margem_bruta[(df_margem_bruta['receita'] > 0) | (df_margem_bruta['custo_total'] > 0)].copy()
 
     # 2. TRATAMENTO ROBUSTO DA DATA DE COMPETÊNCIA
-    hoje = pd.Timestamp.now().date()
-    
     if 'data_inicio_presencial' in df_margem.columns:
         datas_convertidas = pd.to_datetime(df_margem['data_inicio_presencial'], errors='coerce')
         df_margem['data_formatada'] = datas_convertidas.dt.date
         
-        # Se for estritamente futura (> hoje), entra como Projetado. Caso contrário, é Realizado.
+        # Usa a data do sistema ('hoje' que foi puxada do banco)
         df_margem['status_dre'] = df_margem['data_formatada'].apply(
             lambda d: '⏳ Projetado (Futuro)' if pd.notna(d) and d > hoje else '✅ Realizado'
         )

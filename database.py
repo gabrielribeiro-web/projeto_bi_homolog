@@ -8,11 +8,12 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres.dychhsqpvqtwaslujbir:Acess%40bi2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require",
 )
 
-
 @st.cache_resource
 def get_engine():
-    return create_engine(DATABASE_URL)
-
+    # Usa diretamente a DATABASE_URL definida lá em cima!
+    # O SEGREDO ESTÁ AQUI: pool_pre_ping=True testa se o banco caiu antes de tentar usar
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    return engine
 
 def executar_query(query, params=None):
     engine = get_engine()

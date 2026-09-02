@@ -8,6 +8,7 @@ import requests
 import streamlit as st
 from sqlalchemy import text
 from database import get_engine
+from components import renderizar_filtros
 
 # =====================================================================
 # 1. FUNÇÕES DE LIMPEZA E FORMATAÇÃO
@@ -184,12 +185,13 @@ def recriar_views(engine):
         conn.execute(text(query_mv_valores))
 
 # =====================================================================
-# 3. INTERFACE DE USUÁRIO DO STREAMLIT
+# 3. INTERFACE DE USUÁRIO DO STREAMLIT E APLICAÇÃO VISUAL
 # =====================================================================
+engine_filtros, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros(mostrar_filtros=False)
+
 st.markdown("### 🔄 Sincronização de Dados (Google Sheets)")
 st.caption("Esta ferramenta conecta ao Google Sheets e atualiza todas as tabelas do painel automaticamente.")
 
-user = st.session_state.get("usuario_logado")
 if not user or user.get("perfil") != "admin":
     st.error("Acesso restrito a Administradores.")
     st.stop()
@@ -211,13 +213,11 @@ with st.expander("🔧 Configurar Links das Planilhas (Para Homologação/Cópia
     st.info("Caso esteja realizando testes, apague o link padrão e cole o link de exportação CSV da sua cópia. Ao fechar esta aba, o botão de sincronização usará os links que estão aqui preenchidos.")
     
     for tabela, url_padrao in planilhas_oficiais.items():
-        # Cria um text_input preenchido com o link de prod. O usuário pode alterar livremente.
         link_usuario = st.text_input(f"🔗 Link: {tabela}", value=url_padrao, key=f"url_{tabela}")
         planilhas_ativas[tabela] = link_usuario
 
 st.divider()
 
-# O botão usa o dicionário planilhas_ativas (que pega o que estiver digitado na tela)
 if st.button("🚀 Iniciar Sincronização Completa Agora", type="primary", use_container_width=True):
     with st.status("Conectando aos servidores do Google e Banco de Dados...", expanded=True) as status:
         try:
@@ -241,6 +241,56 @@ if st.button("🚀 Iniciar Sincronização Completa Agora", type="primary", use_
             st.write("⚙️ Recriando Motor de Regras e Views de Performance...")
             recriar_views(engine)
             
+            # ==========================================================
+            # MOTOR DE HISTÓRICO (REGRA RF32 - RASTREABILIDADE)
+            # ==========================================================
+            st.write("📖 Registrando histórico de mudanças na Linha do Tempo...")
+            query_historico = """
+            WITH processos_atuais AS (
+                SELECT 
+                    id_processo, 
+                    status_sla_medicao AS status_operacional,
+                    status_financeiro
+                FROM vw_motor_faturamento
+            ),
+            ultimo_historico AS (
+                SELECT DISTINCT ON (id_processo, tipo_status) 
+                    id_processo, 
+                    status_novo, 
+                    tipo_status
+                FROM tb_historico_processos
+                ORDER BY id_processo, tipo_status, data_mudanca DESC
+            )
+            INSERT INTO tb_historico_processos (id_processo, status_anterior, status_novo, tipo_status)
+            
+            -- MUDANÇAS OPERACIONAIS
+            SELECT 
+                p.id_processo, 
+                COALESCE(u_op.status_novo, 'NOVO PROCESSO'), 
+                p.status_operacional, 
+                'OPERACIONAL'
+            FROM processos_atuais p
+            LEFT JOIN ultimo_historico u_op ON p.id_processo = u_op.id_processo AND u_op.tipo_status = 'OPERACIONAL'
+            WHERE p.status_operacional IS NOT NULL 
+              AND p.status_operacional <> COALESCE(u_op.status_novo, '')
+            
+            UNION ALL
+            
+            -- MUDANÇAS FINANCEIRAS
+            SELECT 
+                p.id_processo, 
+                COALESCE(u_fin.status_novo, 'NOVO PROCESSO'), 
+                p.status_financeiro, 
+                'FINANCEIRO'
+            FROM processos_atuais p
+            LEFT JOIN ultimo_historico u_fin ON p.id_processo = u_fin.id_processo AND u_fin.tipo_status = 'FINANCEIRO'
+            WHERE p.status_financeiro IS NOT NULL 
+              AND p.status_financeiro <> COALESCE(u_fin.status_novo, '');
+            """
+            with engine.begin() as conn:
+                conn.execute(text(query_historico))
+            # ==========================================================
+
             st.cache_data.clear()
 
             status.update(label="Sincronização 100% concluída com sucesso!", state="complete", expanded=False)

@@ -55,10 +55,11 @@ def aplicar_identidade_visual():
     if encoded_string:
         css_bg = f"""
         .stApp {{
-            background-image: linear-gradient(rgba(253, 253, 253, 0.88), rgba(253, 253, 253, 0.88)), url(data:image/{ext};base64,{encoded_string}) !important;
-            background-size: cover !important;
-            background-position: center !important;
-            background-repeat: no-repeat !important;
+            /* Fundo completo para a tela e 700px apenas para a imagem */
+            background-image: linear-gradient(rgba(238, 240, 244, 0.88), rgba(238, 240, 244, 0.88)), url(data:image/{ext};base64,{encoded_string}) !important;
+            background-size: 100% 100%, 700px !important;
+            background-position: center, center !important;
+            background-repeat: no-repeat, no-repeat !important;
             background-attachment: fixed !important;
         }}
         """
@@ -67,133 +68,75 @@ def aplicar_identidade_visual():
     <style>
     {css_bg}
     
-    /* 🔒 TRAVA DO TEMA: Oculta menu e Header */
-    [data-testid="stHeader"] {{ display: none !important; }}
+    /* 🔒 TRAVA DO TEMA: Deixa o topo transparente, MAS NÃO ESCONDE o botão de abrir o menu */
+    [data-testid="stHeader"] {{
+        background-color: transparent !important;
+    }}
+    /* Esconde só os botões inúteis do Streamlit */
     [data-testid="stToolbar"] {{ display: none !important; }}
     #MainMenu {{ display: none !important; }}
     
     /* =========================================================
-       1. BARRA LATERAL (SIDEBAR) - ESTRUTURA FLEX & ORDEM
+       1. BARRA LATERAL (SIDEBAR)
        ========================================================= */
     [data-testid="stSidebar"] {{
         background-color: #1a1e38 !important;
         border-right: 3px solid #aecb36 !important;
     }}
     
-    [data-testid="stSidebarContent"] {{
-        display: flex !important;
-        flex-direction: column !important;
-        height: 100vh !important;
-    }}
-
-    [data-testid="stSidebarUserContent"] {{
-        display: contents !important;
-    }}
-
-    [data-testid="stSidebarUserContent"] > div:has(#profile-card) {{
-        order: 1 !important;
-        margin-top: 0 !important;
-        padding: 15px 15px 5px 15px !important;
-    }}
-
-    [data-testid="stSidebarNav"] {{
-        order: 2 !important;
-        margin-top: 0 !important;
-        padding-top: 10px !important;
-        flex-grow: 1 !important;
-    }}
-
+    [data-testid="stSidebarContent"] {{ display: flex !important; flex-direction: column !important; height: 100vh !important; }}
+    [data-testid="stSidebarUserContent"] {{ display: contents !important; }}
+    [data-testid="stSidebarUserContent"] > div:has(#profile-card) {{ order: 1 !important; margin-top: 0 !important; padding: 15px 15px 5px 15px !important; }}
+    [data-testid="stSidebarNav"] {{ order: 2 !important; margin-top: 0 !important; padding-top: 10px !important; flex-grow: 1 !important; }}
     [data-testid="stSidebarNav"] span {{ color: #fdfdfd !important; font-weight: 500 !important; font-size: 15px !important; }}
     [data-testid="stSidebarNav"] svg {{ fill: #aecb36 !important; color: #aecb36 !important; }}
-    [data-testid="stSidebarNav"] a:hover,
-    [data-testid="stSidebarNav"] a[aria-current="page"] {{
-        background-color: rgba(174, 203, 54, 0.15) !important;
-        border-radius: 8px !important;
-    }}
+    [data-testid="stSidebarNav"] a:hover, [data-testid="stSidebarNav"] a[aria-current="page"] {{ background-color: rgba(174, 203, 54, 0.15) !important; border-radius: 8px !important; }}
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] div {{ color: #fdfdfd; }}
-
-    [data-testid="stSidebarUserContent"] > div:has(.stButton) {{
-        order: 3 !important;
-        margin-top: auto !important;
-        padding: 15px !important;
-        padding-bottom: 25px !important;
-    }}
-
-    [data-testid="stSidebar"] div.stButton > button {{
-        background-color: transparent !important;
-        border: 1px solid #da2c38 !important;
-        color: #da2c38 !important;
-        min-height: 40px !important;
-        border-radius: 6px !important;
-        width: 100% !important;
-    }}
-    [data-testid="stSidebar"] div.stButton > button * {{
-        color: #da2c38 !important;
-        font-weight: bold !important;
-    }}
+    [data-testid="stSidebarUserContent"] > div:has(.stButton) {{ order: 3 !important; margin-top: auto !important; padding: 15px !important; padding-bottom: 25px !important; }}
+    [data-testid="stSidebar"] div.stButton > button {{ background-color: transparent !important; border: 1px solid #da2c38 !important; color: #da2c38 !important; min-height: 40px !important; border-radius: 6px !important; width: 100% !important; }}
+    [data-testid="stSidebar"] div.stButton > button * {{ color: #da2c38 !important; font-weight: bold !important; }}
     [data-testid="stSidebar"] div.stButton > button:hover {{ background-color: #da2c38 !important; }}
     [data-testid="stSidebar"] div.stButton > button:hover * {{ color: #ffffff !important; }}
 
     /* =========================================================
-       2. CARDS DE KPI (MÉTRICAS) COM ANIMAÇÃO E BORDA
+       2. CARDS DE KPI
        ========================================================= */
-    [data-testid="metric-container"] {{
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-top: 4px solid #aecb36;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 2px 4px 10px rgba(0,0,0,0.04);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }}
-    [data-testid="metric-container"]:hover {{
-        transform: translateY(-4px);
-        box-shadow: 2px 8px 20px rgba(0,0,0,0.1);
-    }}
+    [data-testid="metric-container"] {{ background-color: #ffffff; border: 1px solid #e0e0e0; border-top: 4px solid #aecb36; padding: 15px; border-radius: 10px; box-shadow: 2px 4px 10px rgba(0,0,0,0.04); transition: transform 0.2s ease, box-shadow 0.2s ease; }}
+    [data-testid="metric-container"]:hover {{ transform: translateY(-4px); box-shadow: 2px 8px 20px rgba(0,0,0,0.1); }}
 
     /* =========================================================
-       3. OVERRIDE TOTAL DOS SELECTBOXES E INPUTS (FUNDO BRANCO)
+       3. CORREÇÃO DEFINITIVA DOS CAMPOS 
        ========================================================= */
-    [data-testid="stWidgetLabel"],
-    [data-testid="stWidgetLabel"] *,
-    [data-testid="stWidgetLabel"] p,
-    label,
-    .stWidgetLabel {{
-        background-color: transparent !important;
-        background: transparent !important;
-        color: #1a1e38 !important;
+    
+    [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] *, label, .stWidgetLabel {{
+        color: #1a1e38 !important; 
         font-weight: 600 !important;
+        background: transparent !important;
     }}
 
-    /* Força a caixa do Selectbox e DateInput a ficar 100% Branca */
-    [data-testid="stSelectbox"] div[role="combobox"],
-    [data-testid="stSelectbox"] div[data-baseweb="select"],
-    [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-    [data-testid="stDateInput"] div[data-baseweb="input"],
-    div[data-baseweb="select"],
-    div[data-baseweb="select"] > div {{
+    [data-testid="stSelectbox"] div[role="group"],
+    [data-testid="stDateInput"] div[data-baseweb="input"] {{
         background-color: #ffffff !important;
-        background: #ffffff !important;
-        border: 1px solid #cccccc !important;
-        border-radius: 8px !important;
+        border: 1px solid #a0a0a0 !important;
+        border-radius: 6px !important;
+        transition: all 0.2s ease !important;
     }}
 
-    /* Texto dentro dos campos em Azul Escuro */
+    [data-testid="stSelectbox"] div[role="group"]:focus-within,
+    [data-testid="stDateInput"] div[data-baseweb="input"]:focus-within {{
+        border-color: #aecb36 !important;
+        box-shadow: 0 0 0 1px #aecb36 !important;
+    }}
+
     [data-testid="stSelectbox"] span,
-    [data-testid="stSelectbox"] div,
-    [data-testid="stDateInput"] input,
-    div[data-baseweb="select"] span,
-    div[data-baseweb="select"] div {{
+    [data-testid="stSelectbox"] input,
+    [data-testid="stDateInput"] input {{
         color: #1a1e38 !important;
-        -webkit-text-fill-color: #1a1e38 !important;
-        font-weight: 500 !important;
     }}
 
-    /* Setas e Ícones em Azul Escuro */
-    [data-testid="stSelectbox"] svg,
-    [data-testid="stDateInput"] svg,
-    div[data-baseweb="select"] svg {{
-        fill: #1a1e38 !important;
+    [data-testid="stSelectbox"] svg, 
+    [data-testid="stDateInput"] svg {{
+        fill: #1a1e38 !important; 
         color: #1a1e38 !important;
     }}
     </style>
@@ -201,7 +144,7 @@ def aplicar_identidade_visual():
     st.markdown(css, unsafe_allow_html=True)
 
 
-def renderizar_filtros():
+def renderizar_filtros(mostrar_filtros=True):
     aplicar_identidade_visual()
 
     user = st.session_state.get("usuario_logado")
@@ -210,6 +153,9 @@ def renderizar_filtros():
         st.stop()
 
     engine = get_engine()
+
+    if not mostrar_filtros:
+        return engine, user, "Todos", "Todas", date(2026, 1, 1), date(2026, 12, 31), "Presencial"
 
     col_tit, col_logo = st.columns([3, 1])
     with col_tit:

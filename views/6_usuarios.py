@@ -6,7 +6,7 @@ from sqlalchemy import text
 from components import renderizar_filtros
 
 # 1. Carrega o cabeçalho padrão, menu lateral e pega os dados da sessão
-engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros()
+engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros(mostrar_filtros=False)
 
 # 2. Trava de Segurança extra (O app.py já bloqueia, mas garantimos aqui também)
 if not user or user["perfil"] != "admin":
