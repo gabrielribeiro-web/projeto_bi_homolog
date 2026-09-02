@@ -40,7 +40,7 @@ with st.expander("📖 Guia de Entendimento dos Indicadores e Status", expanded=
 
 st.divider()
 
-# BUSCA DE DADOS CACHEADOS (MANTIDOS EXATAMENTE IGUAIS)
+# BUSCA DE DADOS CACHEADOS
 df_kpi = buscar_kpis(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 df_motor = buscar_motor_faturamento(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
@@ -52,7 +52,7 @@ else:
     # Previsão Futura
     df_futuros = df_motor[
         (df_motor['validacao'].str.upper().isin(['CONFIRMADO', 'EM PROGRAMAÇÃO'])) & 
-        (df_motor['data_termino'] > pd.Timestamp.now().date())
+        (pd.to_datetime(df_motor['data_termino'], errors='coerce').dt.date > pd.Timestamp.now().date())
     ]
     v_futuro = df_futuros['valor_total'].sum() if not df_futuros.empty else (kpi['futuro_agendado'] + kpi['futuro_lancado'])
     q_futuro = len(df_futuros) if not df_futuros.empty else int(kpi['turmas_realizadas'])

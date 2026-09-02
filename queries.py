@@ -349,6 +349,7 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
         
         CASE
             WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'Não Cobrável'
+            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Finalizado (Pago)'
             WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para NF'
             WHEN UPPER(tipo_faturamento) = 'PONTUAL' THEN
                 CASE 
@@ -358,7 +359,7 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
                 END
             ELSE 
                 CASE
-                    WHEN CURRENT_DATE < mes_subsequente_inicio THEN 'Aguardando virada do mês'
+                    WHEN CURRENT_DATE < mes_subsequente_inicio THEN 'Aguardando virada do mês para fechar a medição'
                     WHEN CURRENT_DATE <= limite_medicao_interna THEN 'Medição em processamento'
                     WHEN CURRENT_DATE <= limite_validacao_cliente THEN 'Aguardando validação do cliente'
                     ELSE 'Medição em atraso cliente'
@@ -374,6 +375,7 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
 
         CASE
             WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'N/A'
+            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Pago (Cancelamento)'
             WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Aguardando emissão de NF'
             WHEN dt_emissao_nf IS NULL THEN 'NF Não Emitida'
             WHEN dt_pagamento_nf IS NOT NULL THEN
@@ -389,6 +391,7 @@ def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_
         END AS dias_atraso_pagamento,
         
         CASE 
+            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Nenhum'
             WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Financeiro'
             WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN 'Cliente'
             WHEN UPPER(validacao) != 'FATURAR' THEN
