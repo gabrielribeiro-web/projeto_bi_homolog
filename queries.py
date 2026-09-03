@@ -3,6 +3,32 @@ import pandas as pd
 from sqlalchemy import text
 import streamlit as st
 
+# =====================================================================
+# HELPERS DE DEPURAÇÃO / VALIDAÇÃO (uso exclusivo do painel admin)
+# =====================================================================
+def _params_to_literal_sql(sql_text: str, params: dict) -> str:
+    out = sql_text
+    for key in sorted(params.keys(), key=len, reverse=True):
+        val = params[key]
+        if val is None:
+            literal = "NULL"
+        elif isinstance(val, (int, float)):
+            literal = str(val)
+        else:
+            literal = "'" + str(val).replace("'", "''") + "'"
+        out = out.replace(f":{key}", literal)
+    return out
+
+def sql_card_wrap(sql_base_literal: str, titulo: str, where_fragment: str) -> str:
+    return (
+        f"-- ============================================================\n"
+        f"-- CARD: {titulo}\n"
+        f"-- ============================================================\n"
+        f"SELECT * FROM (\n{sql_base_literal}\n) AS motor\n"
+        f"WHERE {where_fragment}\n"
+        f"ORDER BY motor.id_processo;"
+    )
+
 def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao="Presencial"):
     condicoes = []
     params = {}
@@ -30,13 +56,162 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
     where_clause = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
     return where_clause, params
 
+# =====================================================================
+# REFINAMENTO DO MOTOR CENTRAL (Baseado no DOC de Requisitos V1)
+# =====================================================================
+def _sql_motor_faturamento_template(where_clause: str) -> str:
+    return f"""
+    WITH params AS (
+        SELECT COALESCE(MAX(data_referencia), CURRENT_DATE) as data_ref FROM public.tb_parametros WHERE id = 1
+    ),
+    base AS (
+        SELECT 
+            fc.processo AS id_processo, 
+            fc.grupo, 
+            fc.cliente, 
+            fc.unidade, 
+            fc.modalidade,
+            fc.cod_treinamento,
+            fc.exigencia_para_faturamento,
+            fc.valor_turma AS valor_original,
+            CASE WHEN fc.valor_turma IS NULL THEN TRUE ELSE FALSE END AS flag_valor_ausente,
+            COALESCE(fc.valor_turma, 0) AS valor_total,
+            
+            NULLIF(TRIM(fc.validacao), '') AS validacao_original,
+            COALESCE(NULLIF(TRIM(fc.validacao), ''), 'EM PROGRAMAÇÃO') AS validacao_calc,
+            fc.status_comercial,
+            
+            fc.dt_inicio_presencial AS data_inicio,
+            CASE WHEN fc.dt_inicio_presencial IS NULL THEN TRUE ELSE FALSE END AS flag_data_inicio_ausente,
+            fc.dt_termino_presencial AS data_termino,
+            
+            NULLIF(TRIM(cli.faturamento), '') AS tipo_faturamento_original,
+            CASE WHEN NULLIF(TRIM(cli.faturamento), '') IS NULL THEN TRUE ELSE FALSE END AS flag_tipo_faturamento_ausente,
+            COALESCE(cli.faturamento, 'NÃO INFORMADO') AS tipo_faturamento,
+            
+            f.nota_fiscal, 
+            f.data_faturamento AS data_emissao, 
+            f.data_vencimento, 
+            f.data_pagamento,
+            
+            fc.pedido_de_compra AS pedido_compra,
+            fc.folha_de_servico AS folha_servico 
+        FROM mv_fato_comercial_tratada fc 
+        LEFT JOIN (
+            SELECT processo, MAX(nota_fiscal) as nota_fiscal, MAX(data_faturamento) as data_faturamento, MAX(data_vencimento) as data_vencimento, MAX(data_pagamento) as data_pagamento
+            FROM fato_faturamento GROUP BY processo
+        ) f ON fc.processo = f.processo
+        LEFT JOIN dim_clientes cli ON fc.cod_cliente = cli.cod_cliente
+        {where_clause}
+    ),
+    logica_datas AS (
+        SELECT 
+            b.*,
+            p.data_ref,
+            b.data_inicio AS data_d,
+            (b.data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
+            
+            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
+            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
+            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month' + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
+            
+            to_date(NULLIF(TRIM(b.data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
+            to_date(NULLIF(TRIM(b.data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
+            to_date(NULLIF(TRIM(b.data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf,
+            
+            CASE WHEN NULLIF(TRIM(b.nota_fiscal), '') IS NOT NULL AND to_date(NULLIF(TRIM(b.data_emissao), ''), 'DD/MM/YYYY') IS NOT NULL THEN TRUE ELSE FALSE END AS nf_completa
+        FROM base b
+        CROSS JOIN params p
+    ),
+    classificacao_motor AS (
+        SELECT 
+            *,
+            CASE
+                WHEN UPPER(validacao_calc) IN ('CANCELADO', 'REAGENDADO') OR UPPER(status_comercial) IN ('CANCELADO', 'REAGENDADO') THEN 'NAO_COBRAVEL'
+                WHEN dt_pagamento_nf IS NOT NULL THEN 'PAGO'
+                WHEN UPPER(validacao_calc) IN ('CANCELADO DIA', 'CANCELADO 24H') AND dt_pagamento_nf IS NULL THEN 'PAGO_CANCELAMENTO'
+                WHEN nf_completa = TRUE AND dt_pagamento_nf IS NULL AND dt_vencimento_nf < data_ref THEN 'PAGAMENTO_EM_ATRASO'
+                WHEN nf_completa = TRUE AND dt_pagamento_nf IS NULL AND dt_vencimento_nf >= data_ref THEN 'A_VENCER'
+                WHEN UPPER(validacao_calc) = 'FATURAR' AND nf_completa = FALSE THEN 'AGUARDANDO_NF'
+                WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND data_d_mais_1 <= data_ref AND UPPER(validacao_calc) != 'FATURAR' THEN 'FATURAMENTO_PENDENTE'
+                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref > limite_validacao_cliente AND UPPER(validacao_calc) != 'FATURAR' THEN 'MEDICAO_EM_ATRASO'
+                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref > limite_medicao_interna AND data_ref <= limite_validacao_cliente AND UPPER(validacao_calc) != 'FATURAR' THEN 'AGUARDANDO_CLIENTE'
+                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref >= mes_subsequente_inicio AND data_ref <= limite_medicao_interna AND UPPER(validacao_calc) != 'FATURAR' THEN 'MEDICAO_EM_PROCESSAMENTO'
+                WHEN (data_termino > data_ref OR data_termino IS NULL) AND (UPPER(validacao_calc) LIKE '%PROGRAMA%' OR UPPER(validacao_calc) = 'CONFIRMADO') THEN 'PREVISAO'
+                WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND data_d = data_ref THEN 'COBRAVEL_D'
+                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_termino <= data_ref AND data_ref < mes_subsequente_inicio THEN 'AGUARDANDO_VIRADA_MES'
+                ELSE 'DESCONHECIDO'
+            END AS etapa_principal
+            
+        FROM logica_datas
+    )
+    SELECT 
+        *,
+        CASE 
+            WHEN etapa_principal = 'PREVISAO' THEN 'Em Programação'
+            WHEN etapa_principal = 'MEDICAO_EM_PROCESSAMENTO' THEN 'Medição em processamento'
+            WHEN etapa_principal = 'AGUARDANDO_CLIENTE' THEN 'Aguardando validação do cliente'
+            WHEN etapa_principal = 'MEDICAO_EM_ATRASO' THEN 'Medição em atraso cliente'
+            WHEN etapa_principal = 'FATURAMENTO_PENDENTE' THEN 'Faturamento pendente - prazo vencido'
+            WHEN etapa_principal = 'AGUARDANDO_NF' THEN 'Aguardando emissão de NF'
+            WHEN etapa_principal = 'A_VENCER' THEN 'A vencer / Em aberto'
+            WHEN etapa_principal = 'PAGAMENTO_EM_ATRASO' THEN 'Pagamento em Atraso'
+            WHEN etapa_principal = 'PAGO' THEN 'Pago no Prazo'
+            WHEN etapa_principal = 'PAGO_CANCELAMENTO' THEN 'Finalizado (Pago)'
+            WHEN etapa_principal = 'AGUARDANDO_VIRADA_MES' THEN 'Aguardando virada do mês para fechar a medição'
+            WHEN etapa_principal = 'NAO_COBRAVEL' THEN 'Não Cobrável'
+            WHEN etapa_principal = 'COBRAVEL_D' THEN 'Cobrável em D'
+            ELSE 'Desconhecido'
+        END AS status_medicao,
+        
+        CASE 
+            WHEN etapa_principal IN ('PAGO', 'PAGO_CANCELAMENTO') THEN 'Pago Confirmado'
+            WHEN etapa_principal = 'PAGAMENTO_EM_ATRASO' THEN 'Pagamento em Atraso'
+            WHEN etapa_principal = 'A_VENCER' THEN 'A vencer / Em aberto'
+            WHEN etapa_principal = 'AGUARDANDO_NF' THEN 'Aguardando emissão de NF'
+            WHEN etapa_principal IN ('NAO_COBRAVEL') THEN 'N/A'
+            ELSE 'NF Não Emitida'
+        END AS status_pagamento,
 
-@st.cache_data(ttl=600, show_spinner=False)
-def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
+        CASE 
+            WHEN etapa_principal = 'FATURAMENTO_PENDENTE' THEN (data_ref - data_d_mais_1)
+            WHEN etapa_principal = 'MEDICAO_EM_ATRASO' THEN (data_ref - limite_validacao_cliente)
+            ELSE 0
+        END AS dias_atraso_medicao,
+        
+        CASE
+            WHEN etapa_principal = 'PAGAMENTO_EM_ATRASO' THEN (data_ref - dt_vencimento_nf)
+            WHEN etapa_principal = 'PAGO' AND dt_pagamento_nf > dt_vencimento_nf THEN (dt_pagamento_nf - dt_vencimento_nf)
+            ELSE 0
+        END AS dias_atraso_pagamento,
+
+        -- -----------------------------------------------------
+        -- COLUNA DE RESPONSÁVEL REINSERIDA AQUI (CORREÇÃO)
+        -- -----------------------------------------------------
+        CASE 
+            WHEN etapa_principal IN ('PAGO', 'PAGO_CANCELAMENTO', 'NAO_COBRAVEL') THEN '✅ Concluído'
+            WHEN etapa_principal = 'AGUARDANDO_NF' THEN '🏢 Financeiro Interno'
+            WHEN etapa_principal IN ('AGUARDANDO_CLIENTE', 'MEDICAO_EM_ATRASO', 'A_VENCER', 'PAGAMENTO_EM_ATRASO') THEN '👤 Cliente'
+            ELSE '🏢 Operação Interna'
+        END AS responsavel_acao
+        
+    FROM classificacao_motor
+    """
+
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_fim, modo_visao):
     where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    col_data = "fc.dt_termino_presencial"
+    sql = text(_sql_motor_faturamento_template(where_clause))
+    with _engine.connect() as conn:
+        return pd.read_sql_query(sql, conn, params=params)
 
-    query = text(f"""
+def sql_motor_faturamento_debug(grupo_cliente, unidade, data_inicio, data_fim, modo_visao) -> str:
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    sql_template = _sql_motor_faturamento_template(where_clause)
+    return _params_to_literal_sql(sql_template, params)
+
+def _sql_kpis_template(where_clause: str, col_data: str) -> str:
+    return f"""
         WITH BaseTreinamentos AS (
             SELECT 
                 fc.processo,
@@ -67,10 +242,10 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
                               AND bt.dt_termino <= CURRENT_DATE
                         THEN bt.valor_turma ELSE 0 END), 0) AS total_faturado,
             
-            COALESCE(SUM(CASE WHEN bt.validacao = 'CONFIRMADO' AND bt.dt_termino > CURRENT_DATE
+            COALESCE(SUM(CASE WHEN bt.validacao = 'CONFIRMADO' AND (bt.dt_termino > CURRENT_DATE OR bt.dt_termino IS NULL)
                         THEN bt.valor_turma ELSE 0 END), 0) AS futuro_agendado,
             
-            COALESCE(SUM(CASE WHEN (bt.validacao IS NULL OR bt.validacao = '') AND bt.dt_termino > CURRENT_DATE
+            COALESCE(SUM(CASE WHEN (bt.validacao IS NULL OR bt.validacao = '') AND (bt.dt_termino > CURRENT_DATE OR bt.dt_termino IS NULL)
                         THEN bt.valor_turma ELSE 0 END), 0) AS futuro_lancado,
             
             COALESCE(SUM(CASE 
@@ -92,10 +267,20 @@ def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, dat
             COALESCE(COUNT(DISTINCT CASE WHEN bt.validacao IN ('CANCELADO 24H', 'CANCELADO DIA', 'CONFIRMADO', 'FATURAR') AND bt.dt_termino <= CURRENT_DATE THEN bt.unidade END), 0) AS unidades_atendidas
         FROM BaseTreinamentos bt
         LEFT JOIN DadosTreinamento dt ON bt.processo = dt.processo
-    """)
+    """
+
+@st.cache_data(ttl=600, show_spinner=False)
+def buscar_kpis(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    col_data = "fc.dt_termino_presencial"
+    query = text(_sql_kpis_template(where_clause, col_data))
     with _engine.connect() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
+def sql_kpis_debug(grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial") -> str:
+    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
+    col_data = "fc.dt_termino_presencial"
+    return _params_to_literal_sql(_sql_kpis_template(where_clause, col_data), params)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_grafico_nrs(_engine, grupo_cliente=None, unidade=None, data_inicio=None, data_fim=None, modo_visao="Presencial"):
@@ -292,126 +477,6 @@ def buscar_ranking_vendedores(_engine, grupo_cliente=None, unidade=None, data_in
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def buscar_motor_faturamento(_engine, grupo_cliente, unidade, data_inicio, data_fim, modo_visao):
-    where_clause, params = _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao)
-    
-    sql = text(f"""
-    WITH base AS (
-        SELECT 
-            fc.processo AS id_processo, 
-            fc.grupo, 
-            fc.cliente, 
-            fc.unidade, 
-            fc.modalidade,
-            fc.cod_treinamento,
-            fc.exigencia_para_faturamento,
-            COALESCE(fc.valor_turma, 0) AS valor_total,
-            COALESCE(NULLIF(TRIM(fc.validacao), ''), 'Em Programação') AS validacao,
-            fc.status_comercial,
-            fc.dt_inicio_presencial AS data_inicio,
-            fc.dt_termino_presencial AS data_termino,
-            COALESCE(cli.faturamento, 'MEDIÇÃO') AS tipo_faturamento,
-            f.nota_fiscal, 
-            f.data_faturamento AS data_emissao, 
-            f.data_vencimento, 
-            f.data_pagamento,
-            fc.pedido_de_compra AS pedido_compra,
-            fc.folha_de_servico AS folha_servico 
-        FROM mv_fato_comercial_tratada fc 
-        LEFT JOIN fato_faturamento f ON fc.processo = f.processo
-        LEFT JOIN dim_clientes cli ON fc.cod_cliente = cli.cod_cliente
-        {where_clause}
-    ),
-    logica_datas AS (
-        SELECT 
-            *,
-            data_inicio AS data_d,
-            (data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
-            (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
-            to_date(NULLIF(TRIM(data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
-            to_date(NULLIF(TRIM(data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
-            to_date(NULLIF(TRIM(data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf
-        FROM base
-    )
-    SELECT 
-        *,
-        CASE 
-            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Cancelado com Cobrança'
-            WHEN UPPER(validacao) = 'CANCELADO' THEN 'Cancelado'
-            WHEN UPPER(validacao) = 'REAGENDADO' THEN 'Reagendado'
-            WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para Faturamento'
-            WHEN CURRENT_DATE >= data_d_mais_1 THEN 'Realizado'
-            WHEN UPPER(validacao) = 'CONFIRMADO' THEN 'Confirmado'
-            ELSE 'Em Programação'
-        END AS status_operacional,
-        
-        CASE
-            WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'Não Cobrável'
-            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Finalizado (Pago)'
-            WHEN UPPER(validacao) = 'FATURAR' THEN 'Liberado para NF'
-            WHEN UPPER(tipo_faturamento) = 'PONTUAL' THEN
-                CASE 
-                    WHEN CURRENT_DATE = data_d THEN 'Cobrável em D'
-                    WHEN CURRENT_DATE >= data_d_mais_1 THEN 'Faturamento pendente - prazo vencido'
-                    ELSE 'Aguardando data de realização'
-                END
-            ELSE 
-                CASE
-                    WHEN CURRENT_DATE < mes_subsequente_inicio THEN 'Aguardando virada do mês para fechar a medição'
-                    WHEN CURRENT_DATE <= limite_medicao_interna THEN 'Medição em processamento'
-                    WHEN CURRENT_DATE <= limite_validacao_cliente THEN 'Aguardando validação do cliente'
-                    ELSE 'Medição em atraso cliente'
-                END
-        END AS status_medicao,
-        
-        CASE 
-            WHEN UPPER(validacao) = 'FATURAR' THEN 0
-            WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND CURRENT_DATE >= data_d_mais_1 THEN (CURRENT_DATE - data_d_mais_1)
-            WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE > limite_validacao_cliente THEN (CURRENT_DATE - limite_validacao_cliente)
-            ELSE 0
-        END AS dias_atraso_medicao,
-
-        CASE
-            WHEN UPPER(validacao) IN ('CANCELADO', 'REAGENDADO') THEN 'N/A'
-            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Pago (Cancelamento)'
-            WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Aguardando emissão de NF'
-            WHEN dt_emissao_nf IS NULL THEN 'NF Não Emitida'
-            WHEN dt_pagamento_nf IS NOT NULL THEN
-                CASE WHEN dt_pagamento_nf <= dt_vencimento_nf THEN 'Pago no Prazo' ELSE 'Pago com Atraso' END
-            WHEN CURRENT_DATE <= dt_vencimento_nf THEN 'A vencer / Em aberto'
-            ELSE 'Pagamento em Atraso'
-        END AS status_pagamento,
-        
-        CASE
-            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN (CURRENT_DATE - dt_vencimento_nf)
-            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NOT NULL AND dt_pagamento_nf > dt_vencimento_nf THEN (dt_pagamento_nf - dt_vencimento_nf)
-            ELSE 0
-        END AS dias_atraso_pagamento,
-        
-        CASE 
-            WHEN UPPER(validacao) IN ('CANCELADO DIA', 'CANCELADO 24H') THEN 'Nenhum'
-            WHEN dt_emissao_nf IS NULL AND UPPER(validacao) = 'FATURAR' THEN 'Financeiro'
-            WHEN dt_emissao_nf IS NOT NULL AND dt_pagamento_nf IS NULL AND CURRENT_DATE > dt_vencimento_nf THEN 'Cliente'
-            WHEN UPPER(validacao) != 'FATURAR' THEN
-                CASE 
-                    WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE BETWEEN mes_subsequente_inicio AND limite_medicao_interna THEN 'Gestão de Contratos / Interno'
-                    WHEN UPPER(tipo_faturamento) != 'PONTUAL' AND CURRENT_DATE > limite_medicao_interna THEN 'Cliente'
-                    WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND CURRENT_DATE >= data_d_mais_1 THEN 'Gestão de Contratos / Interno'
-                    ELSE 'Gestão de Contratos / Interno'
-                END
-            ELSE 'Nenhum'
-        END AS responsavel_acao
-
-    FROM logica_datas
-    """)
-    
-    with _engine.connect() as conn:
-        return pd.read_sql_query(sql, conn, params=params)
-
-
-@st.cache_data(ttl=300, show_spinner=False)
 def buscar_analise_margem(_engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao):
     query = """
     SELECT 
@@ -455,7 +520,6 @@ def buscar_analise_margem(_engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, mo
 
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_colaboradores_treinados(_engine, grupo_sel, unidade_sel, dt_inicio, dt_fim):
-    """Busca a relação de alunos treinados respeitando o filtro de grupo e unidade."""
     query = """
     SELECT 
         nome_aluno AS nome,

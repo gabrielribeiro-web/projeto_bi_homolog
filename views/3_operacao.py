@@ -7,6 +7,7 @@ from database import get_engine
 engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros()
 hover_style = get_hover_style()
 
+# Utiliza a query correta atualizada (buscar_motor_faturamento agora tem o motor central refinado)
 df_motor = buscar_motor_faturamento(engine, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
 # ==============================================================
@@ -17,15 +18,6 @@ try:
     hoje = pd.to_datetime(data_sistema_db).date()
 except:
     hoje = pd.Timestamp.now().date()
-
-# ==============================================================
-# LEITURA DA TABELA DE FATURAMENTO PARA VISÃO UNIFICADA
-# ==============================================================
-try:
-    df_faturamento = pd.read_sql("SELECT processo, status_financeiro FROM fato_faturamento", engine)
-    dict_faturamento = dict(zip(df_faturamento['processo'], df_faturamento['status_financeiro']))
-except:
-    dict_faturamento = {}
 
 # ==============================================================
 # DEFINIÇÃO DE NOMENCLATURAS DINÂMICAS (ADMIN VS CLIENTE)
@@ -43,93 +35,21 @@ st.caption("Acompanhamento de medições, validações e status de documentos (P
 if df_motor.empty:
     st.info("Nenhum dado encontrado para os filtros selecionados.")
 else:
-    # Ajuste de nomenclaturas vindas do banco
-    df_motor['status_medicao'] = df_motor['status_medicao'].replace(
-        'Aguardando virada do mês', 'Aguardando virada do mês para fechar a medição'
-    )
-
-    # -------------------------------------------------------------
-    # RF03 / RF07 / RF13: AJUSTE DE STATUS E DIAS DE ATRASO
-    # -------------------------------------------------------------
-    if 'data_envio_estimada' in df_motor.columns:
-        df_motor['data_envio_calc'] = pd.to_datetime(df_motor['data_envio_estimada'], errors='coerce', dayfirst=True)
-        
-        df_motor['dias_atraso_medicao'] = df_motor.apply(
-            lambda x: (hoje - x['data_envio_calc'].date()).days 
-            if pd.notnull(x['data_envio_calc']) and x['data_envio_calc'].date() < hoje 
-            else 0, 
-            axis=1
-        )
-    
-    def aplicar_regras_rf(row):
-        valida = str(row.get('validacao', '')).strip().upper()
-        dt_ini = pd.to_datetime(row.get('data_inicio'), errors='coerce', dayfirst=True)
-        tipo_fat = str(row.get('tipo_faturamento', '')).strip().upper()
-        
-        # RF03: Validação Vazia ou se o SQL unificou como 'EM PROGRAMAÇÃO'
-        if valida == 'EM PROGRAMAÇÃO' or not valida or valida in ['NAN', 'NONE', 'NULL', '']:
-            row['status_medicao'] = 'Em Programação'
-            row['responsavel_acao'] = 'Sistema'
-        
-        # REGRA REFORÇADA: Se Confirmado e data futura -> "Em Programação"
-        elif valida == 'CONFIRMADO' and pd.notnull(dt_ini) and dt_ini.date() > hoje:
-            row['status_medicao'] = 'Em Programação'
-            row['responsavel_acao'] = 'Sistema'
-            
-        # RF07 e RF13: Pontual vencido em D+1
-        elif tipo_fat == 'PONTUAL' and pd.notnull(dt_ini):
-            dt_ini_date = dt_ini.date()
-            if hoje > dt_ini_date and row['status_medicao'] not in ['Liberado para Faturamento', 'Faturado']:
-                if 'Aguardando' not in row['status_medicao'] and 'Financeiro' not in row['status_medicao']:
-                    row['status_medicao'] = 'Faturamento pendente - prazo vencido'
-                    row['responsavel_acao'] = 'Gestão de Contratos / Interno'
-
-        return row
-
-    df_motor = df_motor.apply(aplicar_regras_rf, axis=1)
-
-    # -------------------------------------------------------------
-    # 🔄 ATUALIZAÇÃO INTELIGENTE DE STATUS (OPERAÇÃO + FINANCEIRO)
-    # -------------------------------------------------------------
-    def atualizar_status_unificado(row):
-        proc_id = row['id_processo']
-        status_med_atual = row['status_medicao']
-        
-        if proc_id in dict_faturamento:
-            status_fin = str(dict_faturamento[proc_id]).strip().upper()
-            
-            # 1. Pago / Concluído
-            if status_fin in ['PAGO', 'PAGAMENTO OK', 'OK', 'CONCLUIDO'] or 'PAGAMENTO OK' in status_fin or 'PAGO' in status_fin:
-                return pd.Series(['Finalizado (Pago)', 'Nenhum', 0])
-            
-            # BLOQUEIO DE PROTEÇÃO: Se a operação ainda está "Em Programação" (futuro), ignoramos financeiro 
-            if status_med_atual == 'Em Programação':
-                return pd.Series([status_med_atual, 'Sistema', 0])
-            
-            # 2. Nota Emitida e Aguardando Pagamento do Cliente
-            elif status_fin in ['AGUARDA PAGAMENTO', 'AGUARDANDO PAGAMENTO', 'ATRASO NO PAGAMENTO']:
-                return pd.Series(['Aguardando Pagamento (Nota Emitida)', 'Cliente (Financeiro)', 0])
-            
-            # 3. Aguardando Autorização do Comercial (NF NÃO emitida ainda)
-            elif 'AUTORIZA' in status_fin:
-                return pd.Series(['Aguardando Autorização Comercial (NF Não Emitida)', 'Comercial Querino', row.get('dias_atraso_medicao', 0)])
-            
-            # 4. Outros status do financeiro
-            else:
-                return pd.Series([f'Financeiro: {status_fin}', 'Financeiro Querino', row.get('dias_atraso_medicao', 0)])
-        
-        return pd.Series([status_med_atual, row['responsavel_acao'], row.get('dias_atraso_medicao', 0)])
-
-    df_motor[['status_medicao', 'responsavel_acao', 'dias_atraso_medicao']] = df_motor.apply(atualizar_status_unificado, axis=1)
-
     # -------------------------------------------------------------
     # 🧹 FILTRAGEM RIGOROSA DE PENDÊNCIAS OPERACIONAIS
+    # Baseada no novo 'etapa_principal' do motor de regras V1
     # -------------------------------------------------------------
-    df_pendentes = df_motor[
-        (~df_motor['status_operacional'].str.contains('Cancelado', na=False, case=False)) &
-        (df_motor['status_operacional'] != 'Reagendado') &
-        (~df_motor['status_medicao'].str.contains('Finalizado|Pago|PAGAMENTO OK', na=False, case=False))
-    ].copy()
+    # Ficam de FORA as etapas concluídas e as etapas puramente financeiras que não dependem da operação/cliente
+    etapas_ocultas = [
+        'NAO_COBRAVEL', 
+        'PAGO', 
+        'PAGO_CANCELAMENTO', 
+        'PAGAMENTO_EM_ATRASO', 
+        'A_VENCER', 
+        'AGUARDANDO_NF' # Financeiro Interno
+    ]
+
+    df_pendentes = df_motor[~df_motor['etapa_principal'].isin(etapas_ocultas)].copy()
     
     if df_pendentes.empty:
         st.success("🎉 Excelente! Nenhum processo pendente de validação operacional.")
@@ -138,14 +58,15 @@ else:
         st.markdown("##### 📊 Resumo de Responsabilidades")
         op1, op2, op3 = st.columns(3)
         
-        df_interno_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Interno|Querino|Comercial', na=False, case=False)]
+        # Novas regras baseadas em responsavel_acao retornado pelo banco (e refinadas pelo V1)
+        df_interno_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Interno|Querino|Comercial|Operação', na=False, case=False)]
         df_cliente_kpi = df_pendentes[df_pendentes['responsavel_acao'].str.contains('Cliente', na=False, case=False)]
         
         op1.metric(lbl_interno, f"R$ {df_interno_kpi['valor_total'].sum():,.2f}", f"{len(df_interno_kpi)} processos", delta_color="inverse" if is_admin else "off")
         op2.metric(lbl_cliente, f"R$ {df_cliente_kpi['valor_total'].sum():,.2f}", f"{len(df_cliente_kpi)} processos", delta_color="inverse")
         
         maior_atraso = df_pendentes['dias_atraso_medicao'].max()
-        op3.metric("Maior Atraso Identificado", f"{maior_atraso} dias", "Foco prioritário", delta_color="inverse" if maior_atraso > 0 else "off")
+        op3.metric("Maior Atraso Identificado", f"{int(maior_atraso) if pd.notna(maior_atraso) else 0} dias", "Foco prioritário", delta_color="inverse" if maior_atraso > 0 else "off")
         
         st.divider()
         
@@ -194,6 +115,9 @@ else:
         if 'cod_treinamento' not in df_pendentes.columns:
             df_pendentes['cod_treinamento'] = '-'
         
+        # Corrige erro de conversao de data 'data_inicio' -> Formatando nativamente no pandas se não for None
+        df_pendentes['data_inicio'] = pd.to_datetime(df_pendentes['data_inicio'], errors='coerce')
+
         df_exibir = df_pendentes[[
             'grupo_exibicao', 'unidade', 'id_processo', 'cod_treinamento', 'data_inicio', 'valor_total', 'tipo_faturamento', 
             'status_medicao', 'responsavel_acao', 'dias_atraso_medicao', 'docs_faltantes'
@@ -206,7 +130,8 @@ else:
                 'Financeiro Querino': 'Equipe Querino',
                 'Cliente': 'Sua Empresa',
                 'Cliente (Financeiro)': 'Sua Empresa (Financeiro)',
-                'Sistema': 'Sistema'
+                'Sistema': 'Sistema',
+                'Operação Interna': 'Equipe Querino'
             })
             cols_remover = [c for c in ['grupo_exibicao', 'tipo_faturamento'] if c in df_exibir.columns]
             df_exibir = df_exibir.drop(columns=cols_remover)

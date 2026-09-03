@@ -35,32 +35,39 @@ def limpar_moeda(val):
 
 def baixar_dataframe_limpo(url_csv):
     url_limpa = url_csv.strip("[]() ")
-    response = requests.get(url_limpa)
-    response.encoding = "utf-8"
+    
+    # O pandas read_csv já resolve codificação e múltiplos formatos de delimitadores (,) ou (;)
+    # E remove automaticamente as linhas de cabeçalhos vazios/sujos acima dos dados reais
+    try:
+        # Tenta ler considerando vírgula como delimitador
+        df = pd.read_csv(url_limpa, encoding="utf-8")
+        if len(df.columns) <= 1: # Se todas as colunas se fundiram em uma, o separador era outro
+            raise ValueError("Delimitador incorreto")
+    except:
+        # Tenta ler considerando ponto-e-vírgula (Padrão PT-BR)
+        df = pd.read_csv(url_limpa, encoding="utf-8", sep=";")
 
-    leitor = list(csv.reader(io.StringIO(response.text)))
-    linha_cabecalho = None
-    palavras_chave = [
-        "STATUS COMERCIAL", "STATUS FOLLOW-UP", "PROCESSO", "INSTRUTOR",
-        "CÓD. CLIENTE", "COD. CLIENTE", "CLIENTE", "NOME", "CPF",
-        "PEDIDO", "STATUS PEDIDO", "EAD", "PRESENCIAL",
-    ]
-
-    for idx, linha in enumerate(leitor):
-        texto_linha = " ".join(linha).upper()
-        if any(x in texto_linha for x in ["AUTOCRAT", "DATASHEET", "NVSCRIPTS", "SCRIPT"]):
-            continue
-        if any(p in texto_linha for p in palavras_chave):
-            linha_cabecalho = idx
-            break
-
-    if linha_cabecalho is None: linha_cabecalho = 0
-
-    dados_uteis = leitor[linha_cabecalho:]
-    cabecalho = dados_uteis[0]
-    linhas_dados = dados_uteis[1:]
-
-    return pd.DataFrame(linhas_dados, columns=cabecalho)
+    # Removemos linhas que o Google Sheets exporta como totalmente nulas/em branco
+    df = df.dropna(how='all')
+    
+    # Busca a linha onde o verdadeiro cabeçalho começa (ignorando os "NVSCRIPTS" no topo das planilhas)
+    palavras_chave = ["STATUS COMERCIAL", "PROCESSO", "INSTRUTOR", "CÓD. CLIENTE", "CLIENTE"]
+    linha_certa = 0
+    
+    # Procuramos se as colunas já estão no cabeçalho ou se estão "afundadas" nas primeiras linhas
+    if not any(any(p in str(c).upper() for p in palavras_chave) for c in df.columns):
+        for idx, row in df.head(15).iterrows():
+            if any(any(p in str(v).upper() for p in palavras_chave) for v in row.values):
+                linha_certa = idx
+                break
+                
+        # Se achou o cabeçalho no meio da planilha, promove aquela linha para ser o cabeçalho oficial
+        if linha_certa > 0:
+            novo_cabecalho = df.iloc[linha_certa]
+            df = df[linha_certa + 1:].copy()
+            df.columns = novo_cabecalho
+    
+    return df
 
 def processar_e_carregar(engine, url_csv, nome_tabela):
     df = baixar_dataframe_limpo(url_csv)
@@ -95,19 +102,23 @@ def recriar_views(engine):
     CREATE OR REPLACE VIEW public.v_fato_comercial_clean AS 
     SELECT 
         fc.*,
-        to_date(NULLIF(TRIM(BOTH FROM inicio_1), ''), 'DD/MM/YYYY') AS data_inicio_1,
-        to_date(NULLIF(TRIM(BOTH FROM termino_1), ''), 'DD/MM/YYYY') AS data_termino_1,
-        to_date(NULLIF(TRIM(BOTH FROM inicio_2), ''), 'DD/MM/YYYY') AS data_inicio_2,
-        to_date(NULLIF(TRIM(BOTH FROM termino_2), ''), 'DD/MM/YYYY') AS data_termino_2,
+        to_date(NULLIF(TRIM(BOTH FROM fc.inicio_1::text), ''), 'DD/MM/YYYY') AS data_inicio_1,
+        to_date(NULLIF(TRIM(BOTH FROM fc.termino_1::text), ''), 'DD/MM/YYYY') AS data_termino_1,
+        to_date(NULLIF(TRIM(BOTH FROM fc.inicio_2::text), ''), 'DD/MM/YYYY') AS data_inicio_2,
+        to_date(NULLIF(TRIM(BOTH FROM fc.termino_2::text), ''), 'DD/MM/YYYY') AS data_termino_2,
+        
+        -- DATA DE TÉRMINO EFETIVA: Pega o Término 2 se existir; senão, o Término 1
         COALESCE(
-            to_date(NULLIF(TRIM(BOTH FROM termino_2), ''), 'DD/MM/YYYY'),
-            to_date(NULLIF(TRIM(BOTH FROM termino_1), ''), 'DD/MM/YYYY')
+            to_date(NULLIF(TRIM(BOTH FROM fc.termino_2::text), ''), 'DD/MM/YYYY'),
+            to_date(NULLIF(TRIM(BOTH FROM fc.termino_1::text), ''), 'DD/MM/YYYY')
         ) AS data_termino_efetiva,
-        COALESCE(NULLIF(TRIM(BOTH FROM ch_formacao), '')::numeric, NULLIF(TRIM(BOTH FROM ch_reciclagem), '')::numeric, 0::numeric) AS ch_realizada_num,
-        inicio_1 AS inicio_str,
-        termino_ead AS termino_ead_str,
-        instrutor_1 AS instrutor,
-        COALESCE(fc.valor_total, 0) AS valor_presencial_calculado
+
+        -- CAST explícito para texto antes do TRIM, e numérico no final
+        COALESCE(NULLIF(TRIM(BOTH FROM fc.ch_formacao::text), '')::numeric, NULLIF(TRIM(BOTH FROM fc.ch_reciclagem::text), '')::numeric, 0::numeric) AS ch_realizada_num,
+        fc.inicio_1::text AS inicio_str,
+        fc.termino_ead::text AS termino_ead_str,
+        fc.instrutor_1::text AS instrutor,
+        COALESCE(fc.valor_total::numeric, 0) AS valor_presencial_calculado
     FROM fato_comercial fc;
     """
 
@@ -132,7 +143,7 @@ def recriar_views(engine):
         CASE WHEN cli.faturamento = 'MEDIÇÃO' THEN (DATE_TRUNC('month', c.data_termino_efetiva) + INTERVAL '1 month + 9 days')::date ELSE c.data_termino_efetiva END AS data_envio_estimada,
         CASE 
             WHEN UPPER(c.validacao) IN ('CANCELADO', 'REAGENDADO') OR UPPER(c.status_comercial) IN ('CANCELADO', 'REAGENDADO') THEN '⚪ Cancelado / Reagendado'
-            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') OR NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NOT NULL OR NULLIF(TRIM(BOTH FROM f.data_pagamento), '') IS NOT NULL THEN '✅ Liberado (Fora do SLA)'
+            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') OR NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NOT NULL OR NULLIF(TRIM(BOTH FROM f.data_pagamento::text), '') IS NOT NULL THEN '✅ Liberado (Fora do SLA)'
             WHEN cli.faturamento = 'MEDIÇÃO' THEN
                 CASE 
                     WHEN DATE_TRUNC('month', CURRENT_DATE) = DATE_TRUNC('month', c.data_termino_efetiva) THEN '⚪ Turmas do Mês Vigente'
@@ -145,19 +156,19 @@ def recriar_views(engine):
         END AS status_sla_medicao,
         CASE
             WHEN UPPER(c.validacao) IN ('CANCELADO', 'REAGENDADO') OR UPPER(c.status_comercial) IN ('CANCELADO', 'REAGENDADO') THEN '⚪ Cancelado / Reagendado'
-            WHEN NULLIF(TRIM(BOTH FROM f.data_pagamento), '') IS NOT NULL AND (NULLIF(TRIM(BOTH FROM f.nota_fiscal_2), '') IS NULL OR NULLIF(TRIM(BOTH FROM f.data_pagamento_2), '') IS NOT NULL) THEN '💰 Pago'
-            WHEN NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NOT NULL THEN
-                CASE WHEN CURRENT_DATE <= to_date(NULLIF(TRIM(BOTH FROM f.data_vencimento), ''), 'DD/MM/YYYY') THEN '💸 Faturas a Vencer' ELSE '🚨 Faturas Vencidas' END
+            WHEN NULLIF(TRIM(BOTH FROM f.data_pagamento::text), '') IS NOT NULL AND (NULLIF(TRIM(BOTH FROM f.nota_fiscal_2::text), '') IS NULL OR NULLIF(TRIM(BOTH FROM f.data_pagamento_2::text), '') IS NOT NULL) THEN '💰 Pago'
+            WHEN NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NOT NULL THEN
+                CASE WHEN CURRENT_DATE <= to_date(NULLIF(TRIM(BOTH FROM f.data_vencimento::text), ''), 'DD/MM/YYYY') THEN '💸 Faturas a Vencer' ELSE '🚨 Faturas Vencidas' END
             WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') THEN
                 CASE WHEN COALESCE(c.valor_total, 0) > COALESCE(f.valor, 0) THEN '🛑 Bloqueado por Saldo de OC' ELSE '✅ Aguardando Emissão de NF' END
             ELSE '⏳ Aguardando Operação'
         END AS status_financeiro,
         CASE 
             WHEN UPPER(c.validacao) IN ('CANCELADO', 'REAGENDADO') OR UPPER(c.status_comercial) IN ('CANCELADO', 'REAGENDADO') THEN '⚪ Cancelado'
-            WHEN c.validacao NOT IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NULL THEN '🏢 Operação Interna'
-            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND COALESCE(c.valor_total, 0) > COALESCE(f.valor, 0) AND NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NULL THEN '👤 Cliente'
-            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NULL THEN '🏢 Financeiro Interno'
-            WHEN NULLIF(TRIM(BOTH FROM f.nota_fiscal), '') IS NOT NULL AND NULLIF(TRIM(BOTH FROM f.data_pagamento), '') IS NULL THEN '👤 Cliente'
+            WHEN c.validacao NOT IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NULL THEN '🏢 Operação Interna'
+            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND COALESCE(c.valor_total, 0) > COALESCE(f.valor, 0) AND NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NULL THEN '👤 Cliente'
+            WHEN c.validacao IN ('FATURAR', 'CANCELADO DIA', 'CANCELADO 24H') AND NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NULL THEN '🏢 Financeiro Interno'
+            WHEN NULLIF(TRIM(BOTH FROM f.nota_fiscal::text), '') IS NOT NULL AND NULLIF(TRIM(BOTH FROM f.data_pagamento::text), '') IS NULL THEN '👤 Cliente'
             ELSE '✅ Concluído'
         END AS responsavel_acao
     FROM v_fato_comercial_clean c LEFT JOIN fato_faturamento f ON c.processo = f.processo LEFT JOIN dim_clientes cli ON c.cod_cliente = cli.cod_cliente;

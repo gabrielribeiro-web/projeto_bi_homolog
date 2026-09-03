@@ -190,3 +190,35 @@ def renderizar_filtros(mostrar_filtros=True):
 
 def get_hover_style():
     return dict(bgcolor="#ffffff", font_size=13, font_color="#1a1e38", font_family="Arial")
+
+
+# =====================================================================
+# 3. QUERIES DE VALIDAÇÃO (SOMENTE ADMIN) — RECURSO TEMPORÁRIO
+# =====================================================================
+def render_query_admin(secoes: dict):
+    """
+    Mostra, apenas para usuários com perfil admin, um bloco com as queries SQL
+    que geram os cards da página — já com os filtros atuais aplicados como
+    valores literais, prontas para copiar e colar no editor SQL do banco
+    (Supabase/pgAdmin) e validar o resultado de cada apontamento.
+
+    `secoes` é um dict {titulo_do_card: sql_texto}.
+
+    Recurso temporário, para a fase de validação/homologação das regras
+    de negócio do motor de faturamento e SLA de medição.
+    """
+    user = st.session_state.get("usuario_logado")
+    if not user or user.get("perfil") != "admin":
+        return
+
+    with st.expander("🛠️ [Admin] Ver queries SQL desta página (validação temporária)", expanded=False):
+        st.caption(
+            "Cada aba mostra a query equivalente ao card correspondente, já com os filtros "
+            "atuais (grupo, unidade, datas) aplicados como valores literais. Copie e cole no "
+            "editor SQL do banco para conferir linha a linha o que compõe o resultado."
+        )
+        titulos = list(secoes.keys())
+        abas = st.tabs(titulos)
+        for aba, titulo in zip(abas, titulos):
+            with aba:
+                st.code(secoes[titulo], language="sql")
