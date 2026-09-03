@@ -57,7 +57,7 @@ def _construir_filtros(grupo_cliente, unidade, data_inicio, data_fim, modo_visao
     return where_clause, params
 
 # =====================================================================
-# REFINAMENTO DO MOTOR CENTRAL (Baseado no DOC de Requisitos V1)
+# REFINAMENTO DO MOTOR CENTRAL (Regras Exatas do Cliente)
 # =====================================================================
 def _sql_motor_faturamento_template(where_clause: str) -> str:
     return f"""
@@ -77,16 +77,16 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
             CASE WHEN fc.valor_turma IS NULL THEN TRUE ELSE FALSE END AS flag_valor_ausente,
             COALESCE(fc.valor_turma, 0) AS valor_total,
             
-            NULLIF(TRIM(fc.validacao), '') AS validacao_original,
-            COALESCE(NULLIF(TRIM(fc.validacao), ''), 'EM PROGRAMAÇÃO') AS validacao_calc,
+            NULLIF(TRIM(fc.validacao::text), '') AS validacao_original,
+            COALESCE(NULLIF(TRIM(fc.validacao::text), ''), 'EM PROGRAMAÇÃO') AS validacao_calc,
             fc.status_comercial,
             
             fc.dt_inicio_presencial AS data_inicio,
             CASE WHEN fc.dt_inicio_presencial IS NULL THEN TRUE ELSE FALSE END AS flag_data_inicio_ausente,
             fc.dt_termino_presencial AS data_termino,
             
-            NULLIF(TRIM(cli.faturamento), '') AS tipo_faturamento_original,
-            CASE WHEN NULLIF(TRIM(cli.faturamento), '') IS NULL THEN TRUE ELSE FALSE END AS flag_tipo_faturamento_ausente,
+            NULLIF(TRIM(cli.faturamento::text), '') AS tipo_faturamento_original,
+            CASE WHEN NULLIF(TRIM(cli.faturamento::text), '') IS NULL THEN TRUE ELSE FALSE END AS flag_tipo_faturamento_ausente,
             COALESCE(cli.faturamento, 'NÃO INFORMADO') AS tipo_faturamento,
             
             f.nota_fiscal, 
@@ -98,7 +98,7 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
             fc.folha_de_servico AS folha_servico 
         FROM mv_fato_comercial_tratada fc 
         LEFT JOIN (
-            SELECT processo, MAX(nota_fiscal) as nota_fiscal, MAX(data_faturamento) as data_faturamento, MAX(data_vencimento) as data_vencimento, MAX(data_pagamento) as data_pagamento
+            SELECT processo, MAX(nota_fiscal::text) as nota_fiscal, MAX(data_faturamento::text) as data_faturamento, MAX(data_vencimento::text) as data_vencimento, MAX(data_pagamento::text) as data_pagamento
             FROM fato_faturamento GROUP BY processo
         ) f ON fc.processo = f.processo
         LEFT JOIN dim_clientes cli ON fc.cod_cliente = cli.cod_cliente
@@ -111,15 +111,11 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
             b.data_inicio AS data_d,
             (b.data_inicio + INTERVAL '1 day')::date AS data_d_mais_1,
             
-            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month')::date AS mes_subsequente_inicio,
-            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month' + INTERVAL '9 days')::date AS limite_medicao_interna,
-            (DATE_TRUNC('month', b.data_termino) + INTERVAL '1 month' + INTERVAL '2 months' - INTERVAL '1 day')::date AS limite_validacao_cliente,
+            to_date(NULLIF(TRIM(b.data_emissao::text), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
+            to_date(NULLIF(TRIM(b.data_vencimento::text), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
+            to_date(NULLIF(TRIM(b.data_pagamento::text), ''), 'DD/MM/YYYY') AS dt_pagamento_nf,
             
-            to_date(NULLIF(TRIM(b.data_emissao), ''), 'DD/MM/YYYY') AS dt_emissao_nf,
-            to_date(NULLIF(TRIM(b.data_vencimento), ''), 'DD/MM/YYYY') AS dt_vencimento_nf,
-            to_date(NULLIF(TRIM(b.data_pagamento), ''), 'DD/MM/YYYY') AS dt_pagamento_nf,
-            
-            CASE WHEN NULLIF(TRIM(b.nota_fiscal), '') IS NOT NULL AND to_date(NULLIF(TRIM(b.data_emissao), ''), 'DD/MM/YYYY') IS NOT NULL THEN TRUE ELSE FALSE END AS nf_completa
+            CASE WHEN NULLIF(TRIM(b.nota_fiscal::text), '') IS NOT NULL AND to_date(NULLIF(TRIM(b.data_emissao::text), ''), 'DD/MM/YYYY') IS NOT NULL THEN TRUE ELSE FALSE END AS nf_completa
         FROM base b
         CROSS JOIN params p
     ),
@@ -127,20 +123,57 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
         SELECT 
             *,
             CASE
+                -- 1. NAO COBRAVEL
                 WHEN UPPER(validacao_calc) IN ('CANCELADO', 'REAGENDADO') OR UPPER(status_comercial) IN ('CANCELADO', 'REAGENDADO') THEN 'NAO_COBRAVEL'
+                
+                -- 2. PAGO
                 WHEN dt_pagamento_nf IS NOT NULL THEN 'PAGO'
                 WHEN UPPER(validacao_calc) IN ('CANCELADO DIA', 'CANCELADO 24H') AND dt_pagamento_nf IS NULL THEN 'PAGO_CANCELAMENTO'
+                
+                -- 3. FINANCEIRO (NF EMITIDA)
                 WHEN nf_completa = TRUE AND dt_pagamento_nf IS NULL AND dt_vencimento_nf < data_ref THEN 'PAGAMENTO_EM_ATRASO'
                 WHEN nf_completa = TRUE AND dt_pagamento_nf IS NULL AND dt_vencimento_nf >= data_ref THEN 'A_VENCER'
+                
+                -- 4. AGUARDANDO NF (Liberado Comercial)
                 WHEN UPPER(validacao_calc) = 'FATURAR' AND nf_completa = FALSE THEN 'AGUARDANDO_NF'
-                WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND data_d_mais_1 <= data_ref AND UPPER(validacao_calc) != 'FATURAR' THEN 'FATURAMENTO_PENDENTE'
-                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref > limite_validacao_cliente AND UPPER(validacao_calc) != 'FATURAR' THEN 'MEDICAO_EM_ATRASO'
-                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref > limite_medicao_interna AND data_ref <= limite_validacao_cliente AND UPPER(validacao_calc) != 'FATURAR' THEN 'AGUARDANDO_CLIENTE'
-                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_ref >= mes_subsequente_inicio AND data_ref <= limite_medicao_interna AND UPPER(validacao_calc) != 'FATURAR' THEN 'MEDICAO_EM_PROCESSAMENTO'
-                WHEN (data_termino > data_ref OR data_termino IS NULL) AND (UPPER(validacao_calc) LIKE '%PROGRAMA%' OR UPPER(validacao_calc) = 'CONFIRMADO') THEN 'PREVISAO'
-                WHEN UPPER(tipo_faturamento) = 'PONTUAL' AND data_d = data_ref THEN 'COBRAVEL_D'
-                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') AND data_termino <= data_ref AND data_ref < mes_subsequente_inicio THEN 'AGUARDANDO_VIRADA_MES'
-                ELSE 'DESCONHECIDO'
+                
+                -- 5. REGRAS PARA PONTUAL (Atraso direto se D já passou e não faturou)
+                WHEN UPPER(tipo_faturamento) = 'PONTUAL' THEN
+                    CASE 
+                        WHEN data_inicio > data_ref THEN 'PREVISAO'
+                        WHEN data_inicio = data_ref THEN 'COBRAVEL_D'
+                        WHEN data_inicio < data_ref THEN 'FATURAMENTO_PENDENTE'
+                        ELSE 'PREVISAO'
+                    END
+                    
+                -- 6. REGRAS PARA MEDIÇÃO
+                WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') THEN
+                    CASE
+                        -- Se a data de início é depois do mês atual de referência
+                        WHEN DATE_TRUNC('month', data_inicio) > DATE_TRUNC('month', data_ref) THEN 'PREVISAO'
+                        
+                        -- Se a data de início está DENTRO do mês atual de referência
+                        WHEN DATE_TRUNC('month', data_inicio) = DATE_TRUNC('month', data_ref) THEN 'AGUARDANDO_VIRADA_MES'
+                        
+                        -- Passou do mês (Mês Subsequente)
+                        WHEN DATE_TRUNC('month', data_inicio) < DATE_TRUNC('month', data_ref) THEN
+                            CASE
+                                -- Até o dia 10 do mês subsequente
+                                WHEN data_ref <= (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date THEN 'MEDICAO_EM_PROCESSAMENTO'
+                                
+                                -- Do dia 11 até o último dia do mês subsequente
+                                WHEN data_ref > (DATE_TRUNC('month', data_inicio) + INTERVAL '1 month' + INTERVAL '9 days')::date 
+                                 AND data_ref <= (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date THEN 'AGUARDANDO_CLIENTE'
+                                 
+                                -- Virou o segundo mês sem faturar
+                                WHEN data_ref > (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date THEN 'MEDICAO_EM_ATRASO'
+                                
+                                ELSE 'AGUARDANDO_VIRADA_MES'
+                            END
+                    END
+                    
+                -- 7. FALLBACK
+                ELSE 'PREVISAO'
             END AS etapa_principal
             
         FROM logica_datas
@@ -148,7 +181,8 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
     SELECT 
         *,
         CASE 
-            WHEN etapa_principal = 'PREVISAO' THEN 'Em Programação'
+            WHEN etapa_principal = 'PREVISAO' THEN 
+                CASE WHEN UPPER(tipo_faturamento) IN ('MEDIÇÃO', 'MEDICAO') THEN 'Aguardando virada do mês para fechar a medição' ELSE 'Em Programação' END
             WHEN etapa_principal = 'MEDICAO_EM_PROCESSAMENTO' THEN 'Medição em processamento'
             WHEN etapa_principal = 'AGUARDANDO_CLIENTE' THEN 'Aguardando validação do cliente'
             WHEN etapa_principal = 'MEDICAO_EM_ATRASO' THEN 'Medição em atraso cliente'
@@ -175,7 +209,7 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
 
         CASE 
             WHEN etapa_principal = 'FATURAMENTO_PENDENTE' THEN (data_ref - data_d_mais_1)
-            WHEN etapa_principal = 'MEDICAO_EM_ATRASO' THEN (data_ref - limite_validacao_cliente)
+            WHEN etapa_principal = 'MEDICAO_EM_ATRASO' THEN (data_ref - (DATE_TRUNC('month', data_inicio) + INTERVAL '2 months' - INTERVAL '1 day')::date)
             ELSE 0
         END AS dias_atraso_medicao,
         
@@ -185,9 +219,6 @@ def _sql_motor_faturamento_template(where_clause: str) -> str:
             ELSE 0
         END AS dias_atraso_pagamento,
 
-        -- -----------------------------------------------------
-        -- COLUNA DE RESPONSÁVEL REINSERIDA AQUI (CORREÇÃO)
-        -- -----------------------------------------------------
         CASE 
             WHEN etapa_principal IN ('PAGO', 'PAGO_CANCELAMENTO', 'NAO_COBRAVEL') THEN '✅ Concluído'
             WHEN etapa_principal = 'AGUARDANDO_NF' THEN '🏢 Financeiro Interno'

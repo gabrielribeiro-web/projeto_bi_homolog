@@ -19,28 +19,29 @@ from queries import (
 engine, user, grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao = renderizar_filtros()
 hover_style = get_hover_style()
 
-# Verifica se é admin (A mesma verificação feita nas outras telas)
+# Verifica se é admin
 is_admin = user.get("perfil") == "admin"
 
-st.markdown("### 🏢 Portal do Cliente — Gestão de Capacitação")
+# Título Dinâmico
+lbl_titulo = "### 🏢 Visão Executiva — Operação e Faturamento" if is_admin else "### 🏢 Portal do Cliente — Gestão de Capacitação"
+st.markdown(lbl_titulo)
 st.caption("Acompanhamento gerencial de treinamentos, medições, investimentos e status de atendimento.")
 
 # ==============================================================
-# GUIA EXPLICATIVO DE REGRAS E NOMENCLATURAS (NOMENCLATURA CLIENTE)
+# GUIA EXPLICATIVO DE REGRAS E NOMENCLATURAS
 # ==============================================================
 with st.expander("📖 Guia de Entendimento dos Indicadores e Status", expanded=False):
     st.markdown('''
     **📍 Linha do Tempo Operacional & Validações:**
-    - **Previsão Futura:** Turmas confirmadas com término previsto em datas futuras.
-    - **Medição em Compilação:** Turmas do mês anterior em fase de fechamento de documentação (Dias 01 a 10).
+    - **Previsão Futura / Agendados:** Turmas confirmadas com término previsto em datas futuras.
+    - **Medição em Processamento:** Turmas do mês anterior em fase de fechamento de documentação (Dias 01 a 10).
     - **Validação Pendente no Cliente:** Medições enviadas para conferência e aprovação da sua equipe (Dias 11 ao fim do mês).
-    - **Medição em Atraso de Envio:** Medições de meses passados pendentes de aprovação ou emissão de Pedido de Compra (PO/FS).
+    - **Gargalo de Medições:** (Apenas Interno) Medições de meses passados pendentes de aprovação ou emissão de OC.
 
     **💳 Linha do Tempo de Cobrança & Recebimento:**
-    - **Validação Pendente (Pontual):** Treinamento do tipo Pontual concluído aguardando liberação para NF.
+    - **Validação Pendente (Pontual):** Treinamento do tipo Pontual concluído aguardando liberação.
     - **Aguardando Emissão de NF:** Processos validados pela operação aguardando emissão da Nota Fiscal.
-    - **Faturas a Vencer:** Notas Fiscais emitidas dentro do prazo regular de vencimento.
-    - **Faturas Vencidas:** Notas Fiscais emitidas que ultrapassaram a data de vencimento.
+    - **Faturas a Vencer / Vencidas:** Notas Fiscais emitidas aguardando pagamento.
     - **Pagamentos Confirmados:** Processos com pagamento quitado e baixado no sistema.
     ''')
 
@@ -63,136 +64,85 @@ else:
         return len(df_motor[df_motor['etapa_principal'] == etapa])
 
     # ==============================================================
-    # 1. RENDERIZAÇÃO DOS CARDS (NOMENCLATURA REFINADA)
+    # 1. RENDERIZAÇÃO DOS CARDS (DINÂMICO: ADMIN VS CLIENTE)
     # ==============================================================
-    st.markdown("##### 📍 Linha do Tempo Operacional e Validações")
-    m1, m2, m3, m4 = st.columns(4)
+    if is_admin:
+        st.markdown("##### 📍 Linha do Tempo Operacional e Validações")
+        m1, m2, m3, m4 = st.columns(4)
 
-    # Restaura o fallback de KPIs globais para quando o filtro de data secar o motor
-    df_futuros = df_motor[df_motor['etapa_principal'] == 'PREVISAO']
-    v_futuro = df_futuros['valor_total'].sum() if not df_futuros.empty else float(kpi['futuro_agendado'] + kpi['futuro_lancado'])
-    q_futuro = len(df_futuros) if not df_futuros.empty else int(kpi['turmas_realizadas']) # Mantido do código legado
+        df_futuros = df_motor[df_motor['etapa_principal'] == 'PREVISAO']
+        v_futuro = df_futuros['valor_total'].sum() if not df_futuros.empty else float(kpi['futuro_agendado'] + kpi['futuro_lancado'])
+        q_futuro = len(df_futuros) if not df_futuros.empty else int(kpi['turmas_realizadas'])
 
-    m1.metric(
-        "Previsão Futura", 
-        f"R$ {v_futuro:,.2f}", 
-        f"{q_futuro} processos",
-        help="Turmas agendadas ou confirmadas com término previsto em datas futuras."
-    )
-    
-    m2.metric(
-        "Medição em Compilação", 
-        f"R$ {get_valor_etapa('MEDICAO_EM_PROCESSAMENTO'):,.2f}", 
-        f"{get_qtd_etapa('MEDICAO_EM_PROCESSAMENTO')} processos",
-        help="Turmas do mês anterior em fase de organização e compilação documental (Dias 01 a 10)."
-    )
-    m3.metric(
-        "Validação de Medição Pendente", 
-        f"R$ {get_valor_etapa('AGUARDANDO_CLIENTE'):,.2f}", 
-        f"{get_qtd_etapa('AGUARDANDO_CLIENTE')} processos",
-        help="Medições enviadas para conferência e validação da sua equipe (Dias 11 ao fim do mês)."
-    )
-    
-    med_atraso_dias = df_motor[df_motor['etapa_principal'] == 'MEDICAO_EM_ATRASO']['dias_atraso_medicao'].max()
-    m4.metric(
-        "Medição em Atraso de Envio", 
-        f"R$ {get_valor_etapa('MEDICAO_EM_ATRASO'):,.2f}", 
-        f"{get_qtd_etapa('MEDICAO_EM_ATRASO')} parc. (Até {int(med_atraso_dias) if pd.notna(med_atraso_dias) else 0} dias)", 
-        delta_color="inverse",
-        help="Medições de meses passados pendentes de aprovação ou emissão de Pedido de Compra (PO/FS)."
-    )
+        m1.metric("Previsão Futura", f"R$ {v_futuro:,.2f}", f"{q_futuro} processos", help="Turmas agendadas ou confirmadas com término previsto em datas futuras.")
+        m2.metric("Medição em Processamento", f"R$ {get_valor_etapa('MEDICAO_EM_PROCESSAMENTO'):,.2f}", f"{get_qtd_etapa('MEDICAO_EM_PROCESSAMENTO')} processos", help="Turmas do mês anterior em fase de organização e compilação documental (Dias 01 a 10).")
+        m3.metric("Medição Pendente de validação", f"R$ {get_valor_etapa('AGUARDANDO_CLIENTE'):,.2f}", f"{get_qtd_etapa('AGUARDANDO_CLIENTE')} processos", help="Medições enviadas para conferência e validação (Dias 11 ao fim do mês).")
+        
+        med_atraso_dias = df_motor[df_motor['etapa_principal'] == 'MEDICAO_EM_ATRASO']['dias_atraso_medicao'].max()
+        m4.metric(
+            "Gargalo de Medições Antigas", 
+            f"R$ {get_valor_etapa('MEDICAO_EM_ATRASO'):,.2f}", 
+            f"{get_qtd_etapa('MEDICAO_EM_ATRASO')} parc. (Até {int(med_atraso_dias) if pd.notna(med_atraso_dias) else 0} dias)", 
+            delta_color="inverse",
+            help="Processos de meses anteriores sem desfecho. Motivos comuns:\n• Atraso na compilação e envio (Interno);\n• Aguardando aprovação ou Pedido de Compra (Cliente);\n• Falta de atualização para 'FATURAR' na planilha.\n\n💡 Dica: Adicionar uma data de envio ou status 'Enviado' na base de dados permitirá separar as pendências exatas."
+        )
 
-    st.write("")
+        st.write("")
 
-    st.markdown("##### 💳 Linha do Tempo de Cobrança e Recebimento")
-    c1, c2, c3, c4, c5 = st.columns(5)
+        st.markdown("##### 💳 Linha do Tempo de Cobrança e Recebimento")
+        c1, c2, c3, c4, c5 = st.columns(5)
 
-    pontual_atraso_dias = df_motor[df_motor['etapa_principal'] == 'FATURAMENTO_PENDENTE']['dias_atraso_medicao'].max()
-    c1.metric(
-        "Validação Pendente (Pontual)", 
-        f"R$ {get_valor_etapa('FATURAMENTO_PENDENTE'):,.2f}", 
-        f"{get_qtd_etapa('FATURAMENTO_PENDENTE')} proc. (Até {int(pontual_atraso_dias) if pd.notna(pontual_atraso_dias) else 0} dias)", 
-        delta_color="inverse",
-        help="Treinamento pontual concluído (D+1) aguardando liberação para faturamento."
-    )
-    
-    c2.metric(
-        "Aguardando Emissão de NF", 
-        f"R$ {get_valor_etapa('AGUARDANDO_NF'):,.2f}", 
-        f"{get_qtd_etapa('AGUARDANDO_NF')} processos",
-        help="Processos validados pela operação aguardando emissão da Nota Fiscal pelo Financeiro."
-    )
-    c3.metric(
-        "Faturas a Vencer", 
-        f"R$ {get_valor_etapa('A_VENCER'):,.2f}", 
-        f"{get_qtd_etapa('A_VENCER')} processos",
-        help="Notas Fiscais emitidas dentro do prazo regular de vencimento."
-    )
-    
-    vencidas_dias = df_motor[df_motor['etapa_principal'] == 'PAGAMENTO_EM_ATRASO']['dias_atraso_pagamento'].max()
-    c4.metric(
-        "Faturas Vencidas", 
-        f"R$ {get_valor_etapa('PAGAMENTO_EM_ATRASO'):,.2f}", 
-        f"{get_qtd_etapa('PAGAMENTO_EM_ATRASO')} proc. (Até {int(vencidas_dias) if pd.notna(vencidas_dias) else 0} dias)", 
-        delta_color="inverse",
-        help="Notas Fiscais emitidas que ultrapassaram a data de vencimento."
-    )
-    
-    v_pagos = get_valor_etapa('PAGO') + get_valor_etapa('PAGO_CANCELAMENTO')
-    q_pagos = get_qtd_etapa('PAGO') + get_qtd_etapa('PAGO_CANCELAMENTO')
-    c5.metric(
-        "Pagamentos Confirmados", 
-        f"R$ {v_pagos:,.2f}", 
-        f"{q_pagos} processos",
-        help="Valores com pagamento confirmado e quitado no sistema."
-    )
+        pontual_atraso_dias = df_motor[df_motor['etapa_principal'] == 'FATURAMENTO_PENDENTE']['dias_atraso_medicao'].max()
+        c1.metric("Validação Pendente (Pontual)", f"R$ {get_valor_etapa('FATURAMENTO_PENDENTE'):,.2f}", f"{get_qtd_etapa('FATURAMENTO_PENDENTE')} proc. (Até {int(pontual_atraso_dias) if pd.notna(pontual_atraso_dias) else 0} dias)", delta_color="inverse", help="Treinamento pontual concluído (D+1) aguardando liberação para faturamento.")
+        c2.metric("Aguardando Emissão de NF", f"R$ {get_valor_etapa('AGUARDANDO_NF'):,.2f}", f"{get_qtd_etapa('AGUARDANDO_NF')} processos", help="Processos validados pela operação aguardando emissão da Nota Fiscal pelo Financeiro.")
+        c3.metric("Faturas a Vencer", f"R$ {get_valor_etapa('A_VENCER'):,.2f}", f"{get_qtd_etapa('A_VENCER')} processos", help="Notas Fiscais emitidas dentro do prazo regular de vencimento.")
+        
+        vencidas_dias = df_motor[df_motor['etapa_principal'] == 'PAGAMENTO_EM_ATRASO']['dias_atraso_pagamento'].max()
+        c4.metric("Faturas Vencidas", f"R$ {get_valor_etapa('PAGAMENTO_EM_ATRASO'):,.2f}", f"{get_qtd_etapa('PAGAMENTO_EM_ATRASO')} proc. (Até {int(vencidas_dias) if pd.notna(vencidas_dias) else 0} dias)", delta_color="inverse", help="Notas Fiscais emitidas que ultrapassaram a data de vencimento.")
+        
+        v_pagos = get_valor_etapa('PAGO') + get_valor_etapa('PAGO_CANCELAMENTO')
+        q_pagos = get_qtd_etapa('PAGO') + get_qtd_etapa('PAGO_CANCELAMENTO')
+        c5.metric("Pagamentos Confirmados", f"R$ {v_pagos:,.2f}", f"{q_pagos} processos", help="Valores com pagamento confirmado e quitado no sistema.")
 
-    # ==============================================================
-    # BLOCO ADMIN: QUERIES DE VALIDAÇÃO POR CARD (TEMPORÁRIO)
-    # ==============================================================
-    sql_base_motor = sql_motor_faturamento_debug(grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
-    sql_base_kpis = sql_kpis_debug(grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
+        # ==============================================================
+        # BLOCO ADMIN: QUERIES DE VALIDAÇÃO POR CARD
+        # ==============================================================
+        sql_base_motor = sql_motor_faturamento_debug(grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
+        sql_base_kpis = sql_kpis_debug(grupo_sel, unidade_sel, dt_inicio, dt_fim, modo_visao)
 
-    render_query_admin({
-        "Previsão Futura": sql_card_wrap(
-            sql_base_motor, "Previsão Futura",
-            "motor.etapa_principal = 'PREVISAO'"
-        ),
-        "Medição em Compilação": sql_card_wrap(
-            sql_base_motor, "Medição em Compilação",
-            "motor.etapa_principal = 'MEDICAO_EM_PROCESSAMENTO'"
-        ),
-        "Validação de Medição Pendente": sql_card_wrap(
-            sql_base_motor, "Validação de Medição Pendente",
-            "motor.etapa_principal = 'AGUARDANDO_CLIENTE'"
-        ),
-        "Medição em Atraso de Envio": sql_card_wrap(
-            sql_base_motor, "Medição em Atraso de Envio",
-            "motor.etapa_principal = 'MEDICAO_EM_ATRASO'"
-        ),
-        "Validação Pendente (Pontual)": sql_card_wrap(
-            sql_base_motor, "Validação Pendente (Pontual)",
-            "motor.etapa_principal = 'FATURAMENTO_PENDENTE'"
-        ),
-        "Aguardando Emissão de NF": sql_card_wrap(
-            sql_base_motor, "Aguardando Emissão de NF",
-            "motor.etapa_principal = 'AGUARDANDO_NF'"
-        ),
-        "Faturas a Vencer": sql_card_wrap(
-            sql_base_motor, "Faturas a Vencer",
-            "motor.etapa_principal = 'A_VENCER'"
-        ),
-        "Faturas Vencidas": sql_card_wrap(
-            sql_base_motor, "Faturas Vencidas",
-            "motor.etapa_principal = 'PAGAMENTO_EM_ATRASO'"
-        ),
-        "Pagamentos Confirmados": sql_card_wrap(
-            sql_base_motor, "Pagamentos Confirmados",
-            "motor.etapa_principal IN ('PAGO', 'PAGO_CANCELAMENTO')"
-        ),
-        "🔧 Base completa — Motor de Faturamento": sql_base_motor + "\n\n-- (sem filtro adicional: retorna TODAS as linhas usadas pelos cards acima)",
-        "🔧 Base completa — KPIs de topo": sql_base_kpis,
-    })
+        render_query_admin({
+            "Previsão Futura": sql_card_wrap(sql_base_motor, "Previsão Futura", "motor.etapa_principal = 'PREVISAO'"),
+            "Medição em Processamento": sql_card_wrap(sql_base_motor, "Medição em Compilação", "motor.etapa_principal = 'MEDICAO_EM_PROCESSAMENTO'"),
+            "Validação de Medição Pendente": sql_card_wrap(sql_base_motor, "Validação de Medição Pendente", "motor.etapa_principal = 'AGUARDANDO_CLIENTE'"),
+            "Gargalo de Medições Antigas": sql_card_wrap(sql_base_motor, "Gargalo de Medições Antigas", "motor.etapa_principal = 'MEDICAO_EM_ATRASO'"),
+            "Validação Pendente (Pontual)": sql_card_wrap(sql_base_motor, "Validação Pendente (Pontual)", "motor.etapa_principal = 'FATURAMENTO_PENDENTE'"),
+            "Aguardando Emissão de NF": sql_card_wrap(sql_base_motor, "Aguardando Emissão de NF", "motor.etapa_principal = 'AGUARDANDO_NF'"),
+            "Faturas a Vencer": sql_card_wrap(sql_base_motor, "Faturas a Vencer", "motor.etapa_principal = 'A_VENCER'"),
+            "Faturas Vencidas": sql_card_wrap(sql_base_motor, "Faturas Vencidas", "motor.etapa_principal = 'PAGAMENTO_EM_ATRASO'"),
+            "Pagamentos Confirmados": sql_card_wrap(sql_base_motor, "Pagamentos Confirmados", "motor.etapa_principal IN ('PAGO', 'PAGO_CANCELAMENTO')"),
+            "🔧 Base completa — Motor de Faturamento": sql_base_motor + "\n\n-- (sem filtro adicional: retorna TODAS as linhas usadas pelos cards acima)",
+            "🔧 Base completa — KPIs de topo": sql_base_kpis,
+        })
+
+    else:
+        # VISÃO ENXUTA EXCLUSIVA PARA O CLIENTE
+        st.markdown("##### 📊 Resumo do seu Contrato")
+        cli1, cli2, cli3, cli4 = st.columns(4)
+        
+        df_futuros = df_motor[df_motor['etapa_principal'] == 'PREVISAO']
+        v_futuro = df_futuros['valor_total'].sum() if not df_futuros.empty else float(kpi['futuro_agendado'] + kpi['futuro_lancado'])
+        q_futuro = len(df_futuros) if not df_futuros.empty else int(kpi['turmas_realizadas'])
+
+        v_aberto = get_valor_etapa('A_VENCER') + get_valor_etapa('PAGAMENTO_EM_ATRASO')
+        q_aberto = get_qtd_etapa('A_VENCER') + get_qtd_etapa('PAGAMENTO_EM_ATRASO')
+        
+        v_pagos = get_valor_etapa('PAGO') + get_valor_etapa('PAGO_CANCELAMENTO')
+        q_pagos = get_qtd_etapa('PAGO') + get_qtd_etapa('PAGO_CANCELAMENTO')
+
+        cli1.metric("Treinamentos Agendados", f"R$ {v_futuro:,.2f}", f"{q_futuro} turmas previstas", help="Turmas confirmadas para realização em datas futuras.")
+        cli2.metric("Pendente de Sua Aprovação", f"R$ {get_valor_etapa('AGUARDANDO_CLIENTE'):,.2f}", f"{get_qtd_etapa('AGUARDANDO_CLIENTE')} processos aguardando", help="Medições enviadas e aguardando sua validação/emissão de pedido.")
+        cli3.metric("Faturas em Aberto", f"R$ {v_aberto:,.2f}", f"{q_aberto} faturas emitidas", help="Notas Fiscais emitidas (no prazo e vencidas).")
+        cli4.metric("Investimento Realizado", f"R$ {v_pagos:,.2f}", f"{q_pagos} processos pagos", help="Treinamentos já realizados e quitados.")
 
     st.divider()
 
@@ -270,7 +220,6 @@ else:
     g3, g4 = st.columns([1.3, 1])
 
     with g3:
-        # Troca de 'grupo' para 'unidade' para fazer sentido na visão do cliente
         st.markdown("##### 🏢 Investimento por Unidade / Usina")
         if not df_motor.empty and 'unidade' in df_motor.columns:
             df_top_unidades = (

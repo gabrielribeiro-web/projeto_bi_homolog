@@ -254,7 +254,9 @@ st.sidebar.markdown(
 visao_geral = st.Page("views/1_visao_geral.py", title="Visão Executiva", icon="📊")
 qualidade = st.Page("views/2_qualidade.py", title="Qualidade e Entregas", icon="🎓")
 operacao = st.Page("views/3_operacao.py", title="Operação", icon="⚙️")
-paginas_cliente = [visao_geral, qualidade, operacao]
+
+# Páginas que o cliente tem acesso (Ocultamos a Operação daqui)
+paginas_cliente = [visao_geral, qualidade]
 
 if perfil_usuario == "admin":
     comercial = st.Page("views/4_comercial.py", title="Vendas e Comercial", icon="📈")
@@ -264,13 +266,17 @@ if perfil_usuario == "admin":
     inconsistencias = st.Page("views/8_inconsistencias.py", title="Inconsistências", icon="🚨")
     auditoria = st.Page("views/9_auditoria.py", title="Auditoria e Histórico", icon="🕰️")
 
+    # Para o Admin, mostramos TUDO, incluindo a aba de Operação
     pg = st.navigation({
-        "📊 Análises e Operação": paginas_cliente,
+        "📊 Análises e Operação": [visao_geral, qualidade, operacao],
         "💼 Comercial e Financeiro": [comercial, financeiro],
         "🛠️ Configurações do Sistema": [importacao, usuarios, inconsistencias, auditoria],
     })
 else:
-    pg = st.navigation({"📊 Acompanhamento Operacional": paginas_cliente})
+    # Para o Cliente, mostramos apenas a Visão Geral e a Qualidade
+    pg = st.navigation({
+        "📊 Acompanhamento Operacional": paginas_cliente
+    })
 
 # Botão de Sair (Limpa memória e token da URL)
 st.sidebar.markdown("---")
