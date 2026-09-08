@@ -6,11 +6,8 @@ from sqlalchemy import create_engine
 
 @st.cache_resource
 def get_engine():
-    DATABASE_URL = None
-    try:
-        # 1. Identifica qual ambiente carregar (padrão: db_homolog)
-        env_key = st.secrets.get("ACTIVE_ENV", "db_prod")
-        db_config = st.secrets[env_key]
+    env_key = st.secrets.get("ACTIVE_ENV", "db_homolog")
+    db_config = st.secrets[env_key]
         
         # 2. Extrai as credenciais do ambiente selecionado
         db_user = db_config["DB_USER"]
@@ -24,7 +21,9 @@ def get_engine():
         
         # 4. Monta a URL dinamicamente
         DATABASE_URL = f"postgresql://{db_user}:{db_pass_encoded}@{db_host}:{db_port}/{db_name}?sslmode=require"
-        
+
+        return create_engine(DATABASE_URL, pool_pre_ping=True)
+
     except Exception:
         # Fallback caso ocorra falha ao ler o secrets.toml
         DATABASE_URL = os.getenv("DATABASE_URL")
