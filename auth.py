@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 # Configuração Global Segura para Geração de Tokens JWT
 JWT_ALGORITHM = "HS256"
-JWT_SECRET = "querino_bi_secret_key_2026_prod"
+JWT_SECRET = st.secrets.get("JWT_SECRET", "chave_secreta_fallback_desenvolvimento")
 
 try:
     if "JWT_SECRET" in st.secrets:
