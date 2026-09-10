@@ -6,8 +6,16 @@ from sqlalchemy import create_engine
 
 @st.cache_resource
 def get_engine():
+<<<<<<< HEAD
     env_key = st.secrets.get("ACTIVE_ENV", "db_homolog")
     db_config = st.secrets[env_key]
+=======
+    DATABASE_URL = None
+    try:
+        # 1. Identifica qual ambiente carregar (padrão: db_homolog)
+        env_key = st.secrets.get("ACTIVE_ENV", "db_homolog")
+        db_config = st.secrets[env_key]
+>>>>>>> 77e29e0 (security: remove secrets from repository)
         
         # 2. Extrai as credenciais do ambiente selecionado
         db_user = db_config["DB_USER"]
